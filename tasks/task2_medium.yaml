@@ -1,0 +1,67 @@
+task_id: task2_multi_product
+difficulty: medium
+max_steps: 60
+description: >
+  Three products (1 perishable with 5-day shelf life).
+  Day-of-week seasonal demand, variable lead times,
+  shared storage capacity of 500 units.
+
+products:
+  - name: "Electronics"
+    perishable: false
+    shelf_life: null
+    margin: 15.0
+    holding_cost: 1.0
+    ordering_cost: 30.0
+    expiry_penalty: 0.0
+    stockout_penalty: 20.0
+    initial_inventory: 80
+
+  - name: "Clothing"
+    perishable: false
+    shelf_life: null
+    margin: 8.0
+    holding_cost: 0.3
+    ordering_cost: 20.0
+    expiry_penalty: 0.0
+    stockout_penalty: 10.0
+    initial_inventory: 120
+
+  - name: "Fresh Produce"
+    perishable: true
+    shelf_life: 5
+    margin: 12.0
+    holding_cost: 1.5
+    ordering_cost: 15.0
+    expiry_penalty: 8.0
+    stockout_penalty: 18.0
+    initial_inventory: 60
+
+demand:
+  type: seasonal
+  products:
+    - mean: 30
+      std: 8
+    - mean: 40
+      std: 10
+    - mean: 25
+      std: 6
+  seasonality: true
+  weekend_multiplier: 2.0  # Sat/Sun demand doubles
+
+supply:
+  lead_time_min: 1
+  lead_time_max: 4
+  reliability: 1.0
+
+warehouse:
+  capacity: 500
+  fill_rate_bonus_threshold: 0.95
+  fill_rate_bonus: 5.0
+
+grader:
+  type: task2
+  weights:
+    fill_rate: 0.4
+    waste_rate: 0.35
+    inventory_turnover: 0.25

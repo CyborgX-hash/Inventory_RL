@@ -1,0 +1,100 @@
+task_id: task3_nonstationary
+difficulty: hard
+max_steps: 90
+description: >
+  Five products (2 perishable). Non-stationary demand with monthly
+  trends, random shocks, and cross-product substitution effects.
+  Suppliers may delay or partially fulfill orders.
+  Emergency reorder available at 3x cost.
+
+products:
+  - name: "Premium Gadget"
+    perishable: false
+    shelf_life: null
+    margin: 25.0
+    holding_cost: 2.0
+    ordering_cost: 40.0
+    expiry_penalty: 0.0
+    stockout_penalty: 30.0
+    initial_inventory: 60
+    substitute_for: null
+
+  - name: "Budget Gadget"
+    perishable: false
+    shelf_life: null
+    margin: 10.0
+    holding_cost: 0.8
+    ordering_cost: 20.0
+    expiry_penalty: 0.0
+    stockout_penalty: 12.0
+    initial_inventory: 100
+    substitute_for: 0        # competes with product 0
+
+  - name: "Apparel"
+    perishable: false
+    shelf_life: null
+    margin: 12.0
+    holding_cost: 0.5
+    ordering_cost: 25.0
+    expiry_penalty: 0.0
+    stockout_penalty: 15.0
+    initial_inventory: 80
+    substitute_for: null
+
+  - name: "Dairy Products"
+    perishable: true
+    shelf_life: 4
+    margin: 8.0
+    holding_cost: 2.0
+    ordering_cost: 15.0
+    expiry_penalty: 10.0
+    stockout_penalty: 20.0
+    initial_inventory: 40
+    substitute_for: null
+
+  - name: "Baked Goods"
+    perishable: true
+    shelf_life: 3
+    margin: 6.0
+    holding_cost: 1.5
+    ordering_cost: 10.0
+    expiry_penalty: 8.0
+    stockout_penalty: 12.0
+    initial_inventory: 50
+    substitute_for: null
+
+demand:
+  type: nonstationary
+  products:
+    - { base_mean: 20, std: 5 }
+    - { base_mean: 35, std: 8 }
+    - { base_mean: 25, std: 6 }
+    - { base_mean: 30, std: 7 }
+    - { base_mean: 20, std: 5 }
+  seasonality: true
+  weekend_multiplier: 1.5
+  monthly_trend_amplitude: 0.3    # ±30% swing over 30-day cycle
+  demand_shock_probability: 0.05  # 5% chance of a 2× demand spike
+  substitution_factor: 0.3        # 30% of unmet demand for A shifts to B
+
+supply:
+  lead_time_min: 1
+  lead_time_max: 5
+  reliability: 0.7                # 30% chance of partial/delayed delivery
+  partial_fill_min: 0.5           # delivers at least 50% of order
+
+emergency_reorder:
+  enabled: true
+  cost_multiplier: 3.0
+  lead_time: 0                    # arrives same day
+
+warehouse:
+  capacity: 600
+  fill_rate_bonus_threshold: 0.95
+  fill_rate_bonus: 5.0
+
+grader:
+  type: task3
+  baseline_profit_margin: 0.0     # computed dynamically from heuristic
+  emergency_overuse_penalty: 0.1  # penalty per emergency order above threshold
+  emergency_threshold: 5          # max emergency orders before penalty kicks in

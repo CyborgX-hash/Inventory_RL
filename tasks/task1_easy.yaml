@@ -1,0 +1,38 @@
+task_id: task1_single_product
+difficulty: easy
+max_steps: 30
+description: >
+  Single non-perishable product with stable demand.
+  Fixed lead time, unlimited storage. Learn basic reorder policy.
+
+products:
+  - name: "Widget A"
+    perishable: false
+    shelf_life: null
+    margin: 10.0          # profit per unit sold
+    holding_cost: 0.5     # cost per unit per day
+    ordering_cost: 25.0   # fixed cost per order placed
+    expiry_penalty: 0.0
+    stockout_penalty: 15.0
+    initial_inventory: 100
+
+demand:
+  type: stationary
+  mean: 50
+  std: 5
+  seasonality: false
+
+supply:
+  lead_time_min: 2
+  lead_time_max: 2        # fixed lead time
+  reliability: 1.0        # always delivers full order
+
+warehouse:
+  capacity: null           # unlimited
+  fill_rate_bonus_threshold: 0.95
+  fill_rate_bonus: 5.0
+
+grader:
+  type: task1
+  fill_rate_target: 0.90
+  holding_cost_threshold: 30.0   # per-episode average
