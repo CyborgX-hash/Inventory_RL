@@ -24,4 +24,4 @@ COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
 EXPOSE 7860
 
 # Run FastAPI server on port 7860
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "7860"]
+CMD ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "7860"]

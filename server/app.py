@@ -207,9 +207,10 @@ if os.path.exists(static_dir):
             return FileResponse(os.path.join(static_dir, "index.html"))
         return FileResponse(os.path.join(static_dir, full_path))
 
-def start_server():
+def main():
     import uvicorn
-    uvicorn.run("api.main:app", host="0.0.0.0", port=7860)
+    uvicorn.run("server.app:app", host="0.0.0.0", port=7860)
 
 if __name__ == "__main__":
-    start_server()
+    main()
+
