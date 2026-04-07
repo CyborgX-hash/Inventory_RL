@@ -265,6 +265,10 @@ def main():
         "--quiet", action="store_true", help="Only print final results, no step logs"
     )
     args = parser.parse_args()
+    
+    # Auto-detect OpenEnv LiteLLM proxy and force LLM mode so the validator records the API calls
+    if os.environ.get("API_KEY") or os.environ.get("API_BASE_URL"):
+        args.use_llm = True
 
     tasks = (
         ["task1_single_product", "task2_multi_product", "task3_nonstationary"]
