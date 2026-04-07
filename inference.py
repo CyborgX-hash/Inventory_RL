@@ -166,8 +166,8 @@ def run_llm(task_id: str, seed: int = 42, verbose: bool = True) -> dict:
 
     # Hackathon Required OpenAI Configuration
     client = OpenAI(
-        base_url=API_BASE_URL,
-        api_key=HF_TOKEN or os.getenv("OPENAI_API_KEY", "dummy-key")
+        base_url=os.environ.get("API_BASE_URL", "https://api.openai.com/v1"),
+        api_key=os.environ.get("API_KEY", os.environ.get("OPENAI_API_KEY", "dummy-key"))
     )
 
     env = WarehouseEnv(task_id=task_id, seed=seed)
