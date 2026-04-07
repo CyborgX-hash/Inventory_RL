@@ -14,9 +14,19 @@ import json
 import argparse
 import numpy as np
 
+# Hackathon Checklist Requirements
+from openai import OpenAI
+
+API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
+MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4-turbo-preview")
+HF_TOKEN = os.getenv("HF_TOKEN")
+# Optional - if you use from_docker_image():
+LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
+
 from environment.warehouse_env import WarehouseEnv, load_task_config
 from environment.graders import get_grader
 from baseline.heuristic_agent import HeuristicAgent
+
 
 
 def run_heuristic(task_id: str, seed: int = 42, verbose: bool = True) -> dict:
@@ -143,6 +153,83 @@ def run_ppo(task_id: str, model_dir: str, seed: int = 42, verbose: bool = True) 
     return end_log
 
 
+def run_llm(task_id: str, seed: int = 42, verbose: bool = True) -> dict:
+    """Run an LLM-based agent using the OpenAI client on a task."""
+    config = load_task_config(task_id)
+    grader = get_grader(config)
+
+    # Hackathon Required OpenAI Configuration
+    client = OpenAI(
+        base_url=API_BASE_URL,
+        api_key=HF_TOKEN or os.getenv("OPENAI_API_KEY", "dummy-key")
+    )
+
+    env = WarehouseEnv(task_id=task_id, seed=seed)
+    obs, info = env.reset(seed=seed)
+    done = False
+    total_reward = 0.0
+    step = 0
+
+    if verbose:
+        print(json.dumps({"event": "START", "task_id": task_id, "agent": "llm", "episode": 1}))
+
+    while not done:
+        # Construct prompt for the LLM
+        prompt = f"Warehouse state: Inventory={obs['inventory'].tolist()}, Demand={obs['demand_history'].tolist()[-1]}. Reply with JSON array of integers for orders."
+        
+        try:
+            response = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=[
+                    {"role": "system", "content": "You are a warehouse management AI. Reply strictly with a JSON array of integers representing order quantities for each product."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=50
+            )
+            # Extremely basic parse (assuming compliant LLM or fallback to 0)
+            reply = response.choices[0].message.content.strip()
+            import ast
+            action = np.array(ast.literal_eval(reply))
+        except Exception as e:
+            # Fallback to zero-order if LLM fails or is unconfigured
+            action = np.zeros(env.num_products, dtype=np.int64)
+
+        obs, reward, done, truncated, info = env.step(action)
+        total_reward += reward
+        step += 1
+
+        if verbose:
+            step_log = {
+                "event": "STEP",
+                "step": step,
+                "action": action.tolist() if hasattr(action, 'tolist') else list(action),
+                "reward": round(float(reward), 4),
+                "done": done,
+                "fill_rate": round(float(info.get("step_fill_rate", 0)), 4),
+            }
+            print(json.dumps(step_log))
+
+    score = grader.grade(info)
+
+    end_log = {
+        "event": "END",
+        "task_id": task_id,
+        "agent": "llm",
+        "total_reward": round(total_reward, 4),
+        "score": round(score, 4),
+        "fill_rate": round(float(info.get("fill_rate", 0)), 4),
+        "waste_rate": round(float(info.get("waste_rate", 0)), 4),
+        "total_revenue": round(float(info.get("total_revenue", 0)), 2),
+        "total_holding_cost": round(float(info.get("total_holding_cost", 0)), 2),
+        "total_ordering_cost": round(float(info.get("total_ordering_cost", 0)), 2),
+    }
+
+    if verbose:
+        print(json.dumps(end_log))
+
+    return end_log
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run inference on inventory management tasks")
     parser.add_argument(
@@ -156,8 +243,12 @@ def main():
         "--model-dir",
         type=str,
         default=None,
-        help="Path to trained model directory. If not provided, uses heuristic baseline.",
+        help="Path to trained PPO model. If omitted, runs baseline.",
     )
+    parser.add_argument(
+        "--use-llm", action="store_true", help="Run LLM agent using configured API endpoints."
+    )
+
     parser.add_argument(
         "--seed", type=int, default=42, help="Random seed (default: 42)"
     )
@@ -174,13 +265,20 @@ def main():
 
     print(f"\n{'='*60}")
     print("Warehouse Inventory Management — Inference")
-    print(f"Agent: {'PPO' if args.model_dir else 'Heuristic Baseline'}")
+    if args.use_llm:
+        print("Agent: LLM (OpenAI API)")
+    elif args.model_dir:
+        print("Agent: PPO")
+    else:
+        print("Agent: Heuristic Baseline")
     print(f"{'='*60}\n")
 
     results = {}
     for task_id in tasks:
         print(f"\n--- {task_id} ---")
-        if args.model_dir:
+        if args.use_llm:
+            result = run_llm(task_id, args.seed, not args.quiet)
+        elif args.model_dir:
             result = run_ppo(task_id, args.model_dir, args.seed, not args.quiet)
         else:
             result = run_heuristic(task_id, args.seed, not args.quiet)
