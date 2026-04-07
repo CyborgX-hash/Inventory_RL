@@ -2,8 +2,7 @@ import { useState, useEffect } from 'react';
 import { RefreshCw, Play, Package, TrendingUp, AlertTriangle, AlertCircle, Calendar, Truck, Database } from 'lucide-react';
 import './index.css';
 
-const API_BASE = 'http://localhost:8000';
-
+const API_BASE = '';
 function App() {
   const [tasks, setTasks] = useState([]);
   const [selectedTask, setSelectedTask] = useState('task1_single_product');

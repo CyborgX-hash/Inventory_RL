@@ -190,3 +190,19 @@ def list_tasks():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+import os
+
+# Mount the React frontend if the dist folder exists
+static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")
+if os.path.exists(static_dir):
+    app.mount("/assets", StaticFiles(directory=os.path.join(static_dir, "assets")), name="assets")
+
+    @app.get("/{full_path:path}")
+    def serve_frontend(full_path: str):
+        # Serve index.html for root or unknown paths (for React Router if used)
+        if full_path == "" or not os.path.exists(os.path.join(static_dir, full_path)):
+            return FileResponse(os.path.join(static_dir, "index.html"))
+        return FileResponse(os.path.join(static_dir, full_path))
