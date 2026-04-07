@@ -41,8 +41,9 @@ def run_heuristic(task_id: str, seed: int = 42, verbose: bool = True) -> dict:
     total_reward = 0.0
     step = 0
 
+    print(f"[START] task={task_id}", flush=True)
     if verbose:
-        print(json.dumps({"event": "START", "task_id": task_id, "agent": "heuristic", "episode": 1}))
+        print(json.dumps({"event": "START", "task_id": task_id, "agent": "heuristic", "episode": 1}), flush=True)
 
     while not done:
         action = agent.act(obs)
@@ -50,6 +51,7 @@ def run_heuristic(task_id: str, seed: int = 42, verbose: bool = True) -> dict:
         total_reward += reward
         step += 1
 
+        print(f"[STEP] step={step} reward={float(reward):.4f}", flush=True)
         if verbose:
             step_log = {
                 "event": "STEP",
@@ -60,7 +62,7 @@ def run_heuristic(task_id: str, seed: int = 42, verbose: bool = True) -> dict:
                 "fill_rate": round(float(info.get("step_fill_rate", 0)), 4),
                 "inventory": env.inventory.tolist(),
             }
-            print(json.dumps(step_log))
+            print(json.dumps(step_log), flush=True)
 
     score = grader.grade(info)
 
@@ -77,8 +79,9 @@ def run_heuristic(task_id: str, seed: int = 42, verbose: bool = True) -> dict:
         "total_ordering_cost": round(float(info.get("total_ordering_cost", 0)), 2),
     }
 
+    print(f"[END] task={task_id} score={float(score):.4f} steps={step}", flush=True)
     if verbose:
-        print(json.dumps(end_log))
+        print(json.dumps(end_log), flush=True)
 
     return end_log
 
@@ -112,8 +115,9 @@ def run_ppo(task_id: str, model_dir: str, seed: int = 42, verbose: bool = True) 
     total_reward = 0.0
     step = 0
 
+    print(f"[START] task={task_id}", flush=True)
     if verbose:
-        print(json.dumps({"event": "START", "task_id": task_id, "agent": "ppo", "episode": 1}))
+        print(json.dumps({"event": "START", "task_id": task_id, "agent": "ppo", "episode": 1}), flush=True)
 
     while not done:
         action, _ = model.predict(obs, deterministic=True)
@@ -121,6 +125,7 @@ def run_ppo(task_id: str, model_dir: str, seed: int = 42, verbose: bool = True) 
         total_reward += reward
         step += 1
 
+        print(f"[STEP] step={step} reward={float(reward):.4f}", flush=True)
         if verbose:
             step_log = {
                 "event": "STEP",
@@ -130,7 +135,7 @@ def run_ppo(task_id: str, model_dir: str, seed: int = 42, verbose: bool = True) 
                 "done": done,
                 "fill_rate": round(float(info.get("step_fill_rate", 0)), 4),
             }
-            print(json.dumps(step_log))
+            print(json.dumps(step_log), flush=True)
 
     score = grader.grade(info)
 
@@ -147,8 +152,9 @@ def run_ppo(task_id: str, model_dir: str, seed: int = 42, verbose: bool = True) 
         "total_ordering_cost": round(float(info.get("total_ordering_cost", 0)), 2),
     }
 
+    print(f"[END] task={task_id} score={float(score):.4f} steps={step}", flush=True)
     if verbose:
-        print(json.dumps(end_log))
+        print(json.dumps(end_log), flush=True)
 
     return end_log
 
@@ -170,8 +176,9 @@ def run_llm(task_id: str, seed: int = 42, verbose: bool = True) -> dict:
     total_reward = 0.0
     step = 0
 
+    print(f"[START] task={task_id}", flush=True)
     if verbose:
-        print(json.dumps({"event": "START", "task_id": task_id, "agent": "llm", "episode": 1}))
+        print(json.dumps({"event": "START", "task_id": task_id, "agent": "llm", "episode": 1}), flush=True)
 
     while not done:
         # Construct prompt for the LLM
@@ -198,6 +205,7 @@ def run_llm(task_id: str, seed: int = 42, verbose: bool = True) -> dict:
         total_reward += reward
         step += 1
 
+        print(f"[STEP] step={step} reward={float(reward):.4f}", flush=True)
         if verbose:
             step_log = {
                 "event": "STEP",
@@ -207,7 +215,7 @@ def run_llm(task_id: str, seed: int = 42, verbose: bool = True) -> dict:
                 "done": done,
                 "fill_rate": round(float(info.get("step_fill_rate", 0)), 4),
             }
-            print(json.dumps(step_log))
+            print(json.dumps(step_log), flush=True)
 
     score = grader.grade(info)
 
@@ -224,8 +232,9 @@ def run_llm(task_id: str, seed: int = 42, verbose: bool = True) -> dict:
         "total_ordering_cost": round(float(info.get("total_ordering_cost", 0)), 2),
     }
 
+    print(f"[END] task={task_id} score={float(score):.4f} steps={step}", flush=True)
     if verbose:
-        print(json.dumps(end_log))
+        print(json.dumps(end_log), flush=True)
 
     return end_log
 
