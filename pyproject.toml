@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "inventory_rl"
+version = "1.0.0"
+description = "Multi-product warehouse inventory control under stochastic demand"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "CyborgX07" }
+]
+dependencies = [
+    "gymnasium>=0.29.0",
+    "numpy>=1.24.0",
+    "pydantic>=2.0.0",
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+    "pyyaml>=6.0",
+    "stable-baselines3>=2.2.0",
+    "torch>=2.1.0",
+    "shimmy>=1.3.0",
+    "tqdm>=4.65.0",
+    "rich>=13.0.0",
+    "openai>=1.0.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
