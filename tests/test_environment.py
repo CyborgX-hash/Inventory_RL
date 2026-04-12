@@ -15,9 +15,8 @@ Validates:
 import numpy as np
 import pytest
 
-from environment.warehouse_env import WarehouseEnv, ORDER_LEVELS
-from environment.graders import SCORE_MIN, SCORE_MAX
-
+from environment.graders import SCORE_MAX, SCORE_MIN
+from environment.warehouse_env import ORDER_LEVELS, WarehouseEnv
 
 TASK_IDS = [
     "task1_single_product",

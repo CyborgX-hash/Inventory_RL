@@ -14,10 +14,10 @@ Enhanced with:
 This serves as the performance baseline that the RL agent (Task 3) must beat.
 """
 
-import numpy as np
-from typing import List, Optional
 
-from environment.warehouse_env import WarehouseEnv, ORDER_LEVELS, EMERGENCY_ORDER_LEVELS
+import numpy as np
+
+from environment.warehouse_env import EMERGENCY_ORDER_LEVELS, ORDER_LEVELS, WarehouseEnv
 
 
 class HeuristicAgent:
@@ -73,14 +73,11 @@ class HeuristicAgent:
 
         # Round UP to ensure we don't under-order
         best = 0
-        best_level = 0
         for idx, level in enumerate(levels):
             if level >= qty:
                 best = idx
-                best_level = level
                 break
             best = idx
-            best_level = level
 
         if emergency:
             return best + len(ORDER_LEVELS)

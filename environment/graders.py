@@ -8,8 +8,8 @@ Epsilon clamping ensures scores are never exactly 0.0 or 1.0,
 which some hackathon validators reject.
 """
 
+
 import numpy as np
-from typing import Dict
 
 # Safe score boundaries — validators may reject exact 0 or 1
 SCORE_EPS = 1e-3
@@ -122,8 +122,8 @@ class Task3Grader:
         if self._baseline_computed:
             return
         try:
-            from environment.warehouse_env import WarehouseEnv
             from baseline.heuristic_agent import HeuristicAgent
+            from environment.warehouse_env import WarehouseEnv
 
             env = WarehouseEnv("task3_nonstationary", seed=0)
             agent = HeuristicAgent(env)

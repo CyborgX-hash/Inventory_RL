@@ -12,7 +12,7 @@ Endpoints (matching openenv.yaml):
 
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 from fastapi import FastAPI, HTTPException
@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from environment.graders import SCORE_MIN, SCORE_MAX, get_grader
+from environment.graders import SCORE_MAX, SCORE_MIN, get_grader
 from environment.models import (
     ProductActionMetadata,
     TaskMetadata,
@@ -77,7 +77,7 @@ class EnvironmentSession:
 
 
 # Active session (one at a time — fine for single-user hackathon demo)
-_session: Optional[EnvironmentSession] = None
+_session: EnvironmentSession | None = None
 
 
 def _get_session() -> EnvironmentSession:
@@ -99,7 +99,7 @@ class ResetRequest(BaseModel):
         default="task1_single_product",
         description="Task to load: task1_single_product, task2_multi_product, or task3_nonstationary",
     )
-    seed: Optional[int] = Field(default=None, description="Random seed for reproducibility")
+    seed: int | None = Field(default=None, description="Random seed for reproducibility")
 
 
 class ResetResponse(BaseModel):
@@ -107,17 +107,17 @@ class ResetResponse(BaseModel):
     task_id: str
     max_steps: int
     num_products: int
-    product_names: List[str] = Field(..., description="Human-readable names for each product")
+    product_names: list[str] = Field(..., description="Human-readable names for each product")
     actions_per_product: int = Field(
         ..., description="Number of legal action indices per product"
     )
-    legal_actions: List[ProductActionMetadata] = Field(
+    legal_actions: list[ProductActionMetadata] = Field(
         ..., description="Structured description of legal actions per product"
     )
 
 
 class StepRequest(BaseModel):
-    action_ids: List[int] = Field(
+    action_ids: list[int] = Field(
         ...,
         description=(
             "One action index per product. Each index selects from ORDER_LEVELS: "
@@ -131,11 +131,11 @@ class StepResponse(BaseModel):
     state: WarehouseState
     reward: float = Field(..., description="Normalized reward for this step (0–1)")
     done: bool = Field(..., description="Whether the episode has ended")
-    info: Dict[str, Any] = Field(..., description="Detailed metrics breakdown")
-    score: Optional[float] = Field(
+    info: dict[str, Any] = Field(..., description="Detailed metrics breakdown")
+    score: float | None = Field(
         None, description="Final graded score if episode is done (strictly in (0,1))"
     )
-    episode_rewards: List[float] = Field(
+    episode_rewards: list[float] = Field(
         default_factory=list, description="Cumulative reward history for charting"
     )
 
@@ -146,7 +146,7 @@ class StepResponse(BaseModel):
 
 
 @app.post("/reset", response_model=ResetResponse)
-def reset_env(request: Optional[ResetRequest] = None):
+def reset_env(request: ResetRequest | None = None):
     """Reset the environment for a new episode."""
     global _session
 
@@ -172,7 +172,7 @@ def reset_env(request: Optional[ResetRequest] = None):
 
 
 @app.post("/step", response_model=StepResponse)
-def step_env(request: Optional[StepRequest] = None):
+def step_env(request: StepRequest | None = None):
     """Take one step in the environment.
 
     Send action_ids: an array of discrete action indices, one per product.
@@ -235,13 +235,13 @@ def get_state():
     return _get_session().env.get_state()
 
 
-@app.get("/actions", response_model=List[ProductActionMetadata])
+@app.get("/actions", response_model=list[ProductActionMetadata])
 def get_actions():
     """Get legal actions with quantity labels for each product."""
     return _get_session().env.get_legal_actions()
 
 
-@app.get("/tasks", response_model=List[TaskMetadata])
+@app.get("/tasks", response_model=list[TaskMetadata])
 def list_tasks():
     """List all available tasks with metadata."""
     tasks = []

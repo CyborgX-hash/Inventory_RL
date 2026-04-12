@@ -12,7 +12,6 @@ import os
 
 import gymnasium as gym
 import numpy as np
-import torch
 import torch.nn as nn
 from gymnasium import spaces
 from stable_baselines3 import PPO
@@ -20,9 +19,8 @@ from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv
 
-from environment.graders import SCORE_MIN, SCORE_MAX, get_grader
+from environment.graders import SCORE_MAX, SCORE_MIN, get_grader
 from environment.warehouse_env import WarehouseEnv
-
 
 # ──────────────────────────────────────────────────────────────
 # Gymnasium wrapper: flatten Dict obs + normalize

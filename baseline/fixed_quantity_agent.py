@@ -6,10 +6,10 @@ Serves as a lower bound to demonstrate the value of adaptive policies
 like the (s,S) heuristic and PPO agent.
 """
 
-import numpy as np
-from typing import Optional
 
-from environment.warehouse_env import WarehouseEnv, ORDER_LEVELS
+import numpy as np
+
+from environment.warehouse_env import ORDER_LEVELS, WarehouseEnv
 
 
 class FixedQuantityAgent:

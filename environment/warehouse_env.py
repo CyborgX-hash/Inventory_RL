@@ -7,7 +7,7 @@ and emergency reorder logic across all three task difficulty levels.
 
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import gymnasium as gym
 import numpy as np
@@ -15,11 +15,10 @@ import yaml
 from gymnasium import spaces
 
 from environment.demand_simulator import DemandSimulator
-from environment.graders import SCORE_MIN, SCORE_MAX
+from environment.graders import SCORE_MAX, SCORE_MIN
 from environment.models import (
     ActionChoice,
     ProductActionMetadata,
-    StepResult,
     WarehouseState,
 )
 
@@ -71,7 +70,7 @@ def load_task_config(task_id: str) -> dict:
     if filename is None:
         raise ValueError(f"Unknown task_id: {task_id}")
     path = os.path.join(TASKS_DIR, filename)
-    with open(path, "r") as f:
+    with open(path) as f:
         return yaml.safe_load(f)
 
 
@@ -109,7 +108,7 @@ class WarehouseEnv(gym.Env):
         self.rng = np.random.default_rng(seed)
 
         # --- Products ---
-        self.product_configs: List[dict] = self.config["products"]
+        self.product_configs: list[dict] = self.config["products"]
         self.num_products = len(self.product_configs)
 
         # --- Supply ---
@@ -195,7 +194,7 @@ class WarehouseEnv(gym.Env):
         self.days_to_expiry = np.array(
             [p.get("shelf_life") or -1 for p in self.product_configs], dtype=np.int32
         )
-        self.expiry_tracker: List[List[Tuple[float, int]]] = [
+        self.expiry_tracker: list[list[tuple[float, int]]] = [
             [] for _ in range(self.num_products)
         ]
         # Initialize expiry batches for initial inventory
@@ -212,7 +211,7 @@ class WarehouseEnv(gym.Env):
         self.day_of_week = 0
 
         # Supplier reliability tracking (rolling window)
-        self.supplier_delivery_history: List[List[float]] = [
+        self.supplier_delivery_history: list[list[float]] = [
             [1.0] * 5 for _ in range(self.num_products)
         ]
 
@@ -233,8 +232,8 @@ class WarehouseEnv(gym.Env):
         self._high_service_days = 0
 
     def reset(
-        self, *, seed: Optional[int] = None, options: Optional[dict] = None
-    ) -> Tuple[Dict[str, Any], dict]:
+        self, *, seed: int | None = None, options: dict | None = None
+    ) -> tuple[dict[str, Any], dict]:
         if seed is not None:
             self.rng = np.random.default_rng(seed)
             self.demand_sim.rng = self.rng
@@ -244,7 +243,7 @@ class WarehouseEnv(gym.Env):
     # ------------------------------------------------------------------
     # Action helpers
     # ------------------------------------------------------------------
-    def decode_action(self, action_index: int, product_index: int) -> Tuple[int, bool]:
+    def decode_action(self, action_index: int, product_index: int) -> tuple[int, bool]:
         """Decode a single action index into (order_quantity, is_emergency).
 
         Args:
@@ -277,11 +276,11 @@ class WarehouseEnv(gym.Env):
             )
         return np.clip(action, 0, self.actions_per_product - 1)
 
-    def get_product_names(self) -> List[str]:
+    def get_product_names(self) -> list[str]:
         """Return human-readable product names from config."""
         return [p["name"] for p in self.product_configs]
 
-    def get_legal_actions(self) -> List[ProductActionMetadata]:
+    def get_legal_actions(self) -> list[ProductActionMetadata]:
         """Return structured metadata about legal actions for each product.
 
         This is the single source of truth for the frontend and LLM agents.
@@ -327,7 +326,7 @@ class WarehouseEnv(gym.Env):
     # ------------------------------------------------------------------
     def step(
         self, action: np.ndarray
-    ) -> Tuple[Dict[str, Any], float, bool, bool, dict]:
+    ) -> tuple[dict[str, Any], float, bool, bool, dict]:
         """Execute one day of warehouse operations.
 
         Args:
@@ -443,7 +442,7 @@ class WarehouseEnv(gym.Env):
             self.in_transit[i] = np.roll(self.in_transit[i], -1)
             self.in_transit[i, -1] = 0.0
 
-    def _place_orders(self, action: np.ndarray) -> Tuple[float, int]:
+    def _place_orders(self, action: np.ndarray) -> tuple[float, int]:
         """Decode action indices and place orders. Returns (total_cost, emergency_count)."""
         order_costs = 0.0
         emergency_count = 0
@@ -504,7 +503,7 @@ class WarehouseEnv(gym.Env):
 
     def _fulfill_demand(
         self,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
         """Generate demand and fulfill from inventory. Returns (demand, sold, stockout, revenue)."""
         demand = self.demand_sim.generate(
             self.day_of_week,
@@ -583,7 +582,7 @@ class WarehouseEnv(gym.Env):
         stockout_units: np.ndarray,
         demand: np.ndarray,
         units_sold: np.ndarray,
-    ) -> Tuple[float, float]:
+    ) -> tuple[float, float]:
         """Compute normalized reward. Returns (reward, raw_reward).
 
         Components (see RewardConfig for coefficient documentation):
@@ -656,7 +655,7 @@ class WarehouseEnv(gym.Env):
     # ------------------------------------------------------------------
     # Observations & Info
     # ------------------------------------------------------------------
-    def _get_obs(self) -> Dict[str, Any]:
+    def _get_obs(self) -> dict[str, Any]:
         storage_frac = (
             np.sum(self.inventory) / self.capacity
             if self.capacity

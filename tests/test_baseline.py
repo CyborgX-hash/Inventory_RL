@@ -13,9 +13,8 @@ import pytest
 
 from baseline.fixed_quantity_agent import FixedQuantityAgent
 from baseline.heuristic_agent import HeuristicAgent
-from environment.graders import SCORE_MIN, SCORE_MAX, get_grader
+from environment.graders import SCORE_MAX, SCORE_MIN, get_grader
 from environment.warehouse_env import WarehouseEnv, load_task_config
-
 
 TASK_IDS = [
     "task1_single_product",

@@ -11,13 +11,13 @@ import numpy as np
 import pytest
 
 from environment.graders import (
+    SCORE_MAX,
+    SCORE_MIN,
     Task1Grader,
     Task2Grader,
     Task3Grader,
-    get_grader,
-    SCORE_MIN,
-    SCORE_MAX,
     _safe_score,
+    get_grader,
 )
 from environment.warehouse_env import WarehouseEnv, load_task_config
 

@@ -14,12 +14,11 @@ import argparse
 import json
 import os
 import sys
-from typing import List, Optional
 
 import numpy as np
 
 from baseline.heuristic_agent import HeuristicAgent
-from environment.graders import SCORE_MIN, SCORE_MAX, get_grader
+from environment.graders import SCORE_MAX, SCORE_MIN, get_grader
 from environment.warehouse_env import (
     EMERGENCY_ORDER_LEVELS,
     ORDER_LEVELS,
@@ -258,8 +257,8 @@ STRATEGY GUIDELINES:
 def _build_llm_user_prompt(
     obs: dict,
     env: WarehouseEnv,
-    last_action: Optional[List[int]] = None,
-    last_reward: Optional[float] = None,
+    last_action: list[int] | None = None,
+    last_reward: float | None = None,
 ) -> str:
     """Build a structured observation prompt for the LLM."""
     product_names = env.get_product_names()
@@ -301,11 +300,11 @@ def _build_llm_user_prompt(
         lines.append(f"\n  Previous action: {last_action}")
         lines.append(f"  Previous reward: {last_reward:.4f}")
 
-    lines.append(f'\nRespond with: {{"action_ids": [one index per product]}}')
+    lines.append('\nRespond with: {"action_ids": [one index per product]}')
     return "\n".join(lines)
 
 
-def _parse_llm_response(reply: str, num_products: int, max_action: int) -> Optional[list]:
+def _parse_llm_response(reply: str, num_products: int, max_action: int) -> list | None:
     """Parse and validate LLM response. Returns action_ids list or None on failure.
 
     Handles common LLM output quirks:

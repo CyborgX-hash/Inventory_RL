@@ -16,13 +16,12 @@ import argparse
 import json
 import os
 from datetime import datetime
-from typing import Dict, List
 
 import numpy as np
 
 from baseline.fixed_quantity_agent import FixedQuantityAgent
 from baseline.heuristic_agent import HeuristicAgent
-from environment.graders import SCORE_MIN, SCORE_MAX, get_grader
+from environment.graders import SCORE_MAX, SCORE_MIN, get_grader
 from environment.warehouse_env import WarehouseEnv, load_task_config
 
 TASK_IDS = [
@@ -58,7 +57,7 @@ def _run_agent_episode(env, agent, grader, seed):
     }
 
 
-def evaluate_heuristic(task_id: str, seeds: List[int]) -> Dict:
+def evaluate_heuristic(task_id: str, seeds: list[int]) -> dict:
     """Run heuristic agent over multiple seeds."""
     config = load_task_config(task_id)
     grader = get_grader(config)
@@ -72,7 +71,7 @@ def evaluate_heuristic(task_id: str, seeds: List[int]) -> Dict:
     return _aggregate_results("heuristic", task_id, results, seeds)
 
 
-def evaluate_fixed_quantity(task_id: str, seeds: List[int]) -> Dict:
+def evaluate_fixed_quantity(task_id: str, seeds: list[int]) -> dict:
     """Run fixed-quantity agent over multiple seeds."""
     config = load_task_config(task_id)
     grader = get_grader(config)
@@ -86,14 +85,13 @@ def evaluate_fixed_quantity(task_id: str, seeds: List[int]) -> Dict:
     return _aggregate_results("fixed_qty", task_id, results, seeds)
 
 
-def evaluate_ppo(task_id: str, model_dir: str, seeds: List[int]) -> Dict:
+def evaluate_ppo(task_id: str, model_dir: str, seeds: list[int]) -> dict:
     """Run PPO agent over multiple seeds."""
     from stable_baselines3 import PPO
 
     from train import FlattenedWarehouseEnv
 
     config = load_task_config(task_id)
-    grader = get_grader(config)
 
     best_path = os.path.join(model_dir, task_id, "best_model.zip")
     final_path = os.path.join(model_dir, f"{task_id}_final.zip")
@@ -133,10 +131,10 @@ def evaluate_ppo(task_id: str, model_dir: str, seeds: List[int]) -> Dict:
 def _aggregate_results(
     agent_name: str,
     task_id: str,
-    results: List[Dict],
-    seeds: List[int],
+    results: list[dict],
+    seeds: list[int],
     model_path: str = None,
-) -> Dict:
+) -> dict:
     """Aggregate per-seed results into summary statistics."""
     scores = [r["score"] for r in results]
     fill_rates = [r["fill_rate"] for r in results]
@@ -161,7 +159,7 @@ def _aggregate_results(
     return summary
 
 
-def print_results(all_results: Dict, fmt: str = "table"):
+def print_results(all_results: dict, fmt: str = "table"):
     """Print a formatted comparison table."""
     if fmt == "markdown":
         _print_markdown(all_results)
@@ -169,7 +167,7 @@ def print_results(all_results: Dict, fmt: str = "table"):
         _print_table(all_results)
 
 
-def _print_table(all_results: Dict):
+def _print_table(all_results: dict):
     """Print as aligned ASCII table."""
     print(f"\n{'=' * 95}")
     print("BENCHMARK RESULTS")
@@ -200,7 +198,7 @@ def _print_table(all_results: Dict):
     print(f"{'=' * 95}\n")
 
 
-def _print_markdown(all_results: Dict):
+def _print_markdown(all_results: dict):
     """Print as markdown table (README-ready)."""
     print("\n| Task | Agent | Score | ±Std | Fill Rate | Waste | Svc Level | Profit |")
     print("|------|-------|:-----:|:----:|:---------:|:-----:|:---------:|:------:|")

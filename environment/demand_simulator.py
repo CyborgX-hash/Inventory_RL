@@ -2,8 +2,8 @@
 Demand simulator supporting stationary, seasonal, and non-stationary demand patterns.
 """
 
+
 import numpy as np
-from typing import Dict, List, Optional
 
 
 class DemandSimulator:
@@ -64,8 +64,8 @@ class DemandSimulator:
         self,
         day_of_week: int,
         global_step: int,
-        current_inventory: Optional[List[float]] = None,
-        product_configs: Optional[List[dict]] = None,
+        current_inventory: list[float] | None = None,
+        product_configs: list[dict] | None = None,
     ) -> np.ndarray:
         """Generate demand for all products for the current day.
 
@@ -117,8 +117,8 @@ class DemandSimulator:
     def _apply_substitution(
         self,
         demands: np.ndarray,
-        current_inventory: List[float],
-        product_configs: List[dict],
+        current_inventory: list[float],
+        product_configs: list[dict],
     ) -> np.ndarray:
         """When product A stocks out, a fraction of its demand shifts to substitute B.
 

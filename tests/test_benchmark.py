@@ -7,10 +7,8 @@ Validates:
 - Scores are in valid range
 """
 
-import numpy as np
-import pytest
 
-from environment.graders import SCORE_MIN, SCORE_MAX
+from environment.graders import SCORE_MAX, SCORE_MIN
 
 
 class TestBenchmarkSmoke:
