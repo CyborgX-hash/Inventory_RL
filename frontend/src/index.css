@@ -34,8 +34,9 @@ body {
 
 .dashboard-container {
   max-width: 1400px;
+  width: 100%;
   margin: 0 auto;
-  padding: 2rem;
+  padding: 1rem 2rem;
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
@@ -63,6 +64,8 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 1.5rem;
 }
 
 .dashboard-title {
@@ -78,6 +81,7 @@ body {
   display: flex;
   gap: 1rem;
   align-items: center;
+  flex-wrap: wrap;
 }
 
 /* Scenario Banner */
@@ -106,6 +110,8 @@ body {
   outline: none;
   transition: all 0.2s;
   min-width: 200px;
+  max-width: 100%;
+  white-space: normal;
 }
 
 .task-select:focus {
@@ -422,6 +428,7 @@ body {
 /* Status summary styling */
 .status-bar {
   display: flex;
+  flex-wrap: wrap;
   gap: 2rem;
   padding: 1rem 1.5rem;
   background: rgba(0, 0, 0, 0.2);
