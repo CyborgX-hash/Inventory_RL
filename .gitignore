@@ -35,7 +35,6 @@ frontend/dist/
 frontend/.vite/
 
 # Dependency locks (uv)
-uv.lock
 
 # Trained model artifacts (use Git LFS for large models)
 models/**/*.zip
