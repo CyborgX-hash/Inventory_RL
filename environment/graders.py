@@ -1,12 +1,25 @@
 """
 Graders for the three task difficulty levels.
 
-Each grader takes episode info dict from the environment and produces
-a final score in [0.0, 1.0].
+Each grader takes an episode info dict from the environment and produces
+a final score in the open interval (0, 1), strictly excluding the boundaries.
+
+Epsilon clamping ensures scores are never exactly 0.0 or 1.0,
+which some hackathon validators reject.
 """
 
 import numpy as np
 from typing import Dict
+
+# Safe score boundaries — validators may reject exact 0 or 1
+SCORE_EPS = 1e-3
+SCORE_MIN = SCORE_EPS
+SCORE_MAX = 1.0 - SCORE_EPS
+
+
+def _safe_score(score: float) -> float:
+    """Clamp a raw score to the safe open interval (SCORE_MIN, SCORE_MAX)."""
+    return float(np.clip(score, SCORE_MIN, SCORE_MAX))
 
 
 class Task1Grader:
@@ -28,7 +41,6 @@ class Task1Grader:
         avg_holding = total_holding / steps
 
         # Fill rate score: linear from 0 at fill_rate=0 to 1 at target
-        # More lenient — partial credit starts from 0
         fr_score = np.clip(fill_rate / max(self.fill_rate_target, 0.01), 0.0, 1.0)
 
         # Holding cost score: 1.0 if below threshold, linear decay to 0 at 3× threshold
@@ -45,7 +57,7 @@ class Task1Grader:
 
         # Combined score: 70% fill rate (primary objective), 30% holding cost
         score = 0.7 * fr_score + 0.3 * hc_score
-        return float(np.clip(score, 0.0, 1.0))
+        return _safe_score(score)
 
 
 class Task2Grader:
@@ -79,7 +91,7 @@ class Task2Grader:
             + self.w_waste * waste_score
             + self.w_turnover * turnover_score
         )
-        return float(np.clip(score, 0.0, 1.0))
+        return _safe_score(score)
 
 
 class Task3Grader:
@@ -154,7 +166,7 @@ class Task3Grader:
             emergency_score = np.clip(1.0 - excess * self.emergency_penalty, 0.0, 1.0)
 
         score = 0.4 * fr_score + 0.4 * profit_score + 0.2 * emergency_score
-        return float(np.clip(score, 0.0, 1.0))
+        return _safe_score(score)
 
 
 def get_grader(config: dict):

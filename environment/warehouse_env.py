@@ -13,7 +13,13 @@ from gymnasium import spaces
 from typing import Any, Dict, List, Optional, Tuple
 
 from environment.demand_simulator import DemandSimulator
-from environment.models import WarehouseState, StepResult
+from environment.graders import SCORE_MIN, SCORE_MAX
+from environment.models import (
+    WarehouseState,
+    StepResult,
+    ActionChoice,
+    ProductActionMetadata,
+)
 
 
 # Valid per-product order quantities
@@ -54,6 +60,15 @@ class WarehouseEnv(gym.Env):
 
     Action (MultiDiscrete):
         Per product: index into ORDER_LEVELS (or extended with emergency levels)
+
+    Action Encoding:
+        Index 0 → order 0 units
+        Index 1 → order 5 units
+        Index 2 → order 10 units
+        Index 3 → order 20 units
+        Index 4 → order 50 units
+        Index 5 → order 100 units
+        (Task 3 only) Index 6–11 → emergency orders of same quantities
     """
 
     metadata = {"render_modes": []}
@@ -195,12 +210,92 @@ class WarehouseEnv(gym.Env):
         return self._get_obs(), self._get_info()
 
     # ------------------------------------------------------------------
+    # Action helpers
+    # ------------------------------------------------------------------
+    def decode_action(self, action_index: int, product_index: int) -> Tuple[int, bool]:
+        """Decode a single action index into (order_quantity, is_emergency).
+
+        Args:
+            action_index: Index into the action space for this product.
+            product_index: Which product this action is for.
+
+        Returns:
+            (quantity, is_emergency) tuple.
+        """
+        if self.emergency_enabled and action_index >= len(ORDER_LEVELS):
+            qty = EMERGENCY_ORDER_LEVELS[action_index - len(ORDER_LEVELS)]
+            return qty, True
+        else:
+            qty = ORDER_LEVELS[min(action_index, len(ORDER_LEVELS) - 1)]
+            return qty, False
+
+    def validate_action(self, action: np.ndarray) -> np.ndarray:
+        """Validate and clamp action indices to legal range.
+
+        Args:
+            action: Array of action indices, one per product.
+
+        Returns:
+            Clamped action array with all indices in [0, actions_per_product).
+        """
+        action = np.asarray(action, dtype=np.int64)
+        if len(action) != self.num_products:
+            raise ValueError(
+                f"Expected {self.num_products} action indices, got {len(action)}"
+            )
+        return np.clip(action, 0, self.actions_per_product - 1)
+
+    def get_product_names(self) -> List[str]:
+        """Return human-readable product names from config."""
+        return [p["name"] for p in self.product_configs]
+
+    def get_legal_actions(self) -> List[ProductActionMetadata]:
+        """Return structured metadata about legal actions for each product.
+
+        This is useful for LLM agents and frontend UIs to understand
+        what each action index means.
+        """
+        result = []
+        for i, pc in enumerate(self.product_configs):
+            choices = []
+            # Normal orders
+            for idx, qty in enumerate(ORDER_LEVELS):
+                label = f"{qty} units" if qty > 0 else "No order"
+                choices.append(ActionChoice(
+                    index=idx,
+                    order_quantity=qty,
+                    is_emergency=False,
+                    label=label,
+                ))
+            # Emergency orders (Task 3 only)
+            if self.emergency_enabled:
+                for idx, qty in enumerate(EMERGENCY_ORDER_LEVELS):
+                    action_idx = idx + len(ORDER_LEVELS)
+                    label = f"{qty} units (emergency)" if qty > 0 else "No emergency order"
+                    choices.append(ActionChoice(
+                        index=action_idx,
+                        order_quantity=qty,
+                        is_emergency=True,
+                        label=label,
+                    ))
+            result.append(ProductActionMetadata(
+                product_index=i,
+                product_name=pc["name"],
+                legal_actions=choices,
+            ))
+        return result
+
+    # ------------------------------------------------------------------
     # Step
     # ------------------------------------------------------------------
     def step(
         self, action: np.ndarray
     ) -> Tuple[Dict[str, Any], float, bool, bool, dict]:
         """Execute one day of warehouse operations.
+
+        Args:
+            action: Array of action indices (one per product). Each index
+                    maps to a quantity via ORDER_LEVELS. NOT raw quantities.
 
         Order of operations:
         1. Receive in-transit shipments that arrive today
@@ -210,33 +305,97 @@ class WarehouseEnv(gym.Env):
         5. Compute reward
         6. Advance day
         """
-        action = np.asarray(action, dtype=np.int64)
+        action = self.validate_action(action)
 
         # ---- 1. Receive arriving shipments ----
+        self._receive_shipments()
+
+        # ---- 2. Decode and place orders ----
+        order_costs, emergency_count = self._place_orders(action)
+
+        self.total_ordering_cost += order_costs
+        self.total_emergency_orders += emergency_count
+
+        # ---- 3. Generate demand and fulfill ----
+        demand, units_sold, stockout_units, revenue = self._fulfill_demand()
+
+        self.total_units_demanded += demand
+        self.total_units_sold += units_sold
+        self.total_stockout_units += stockout_units
+        self.total_revenue += revenue
+
+        # Update demand history (rolling window of 7 days)
+        self.demand_history = np.roll(self.demand_history, -1, axis=1)
+        self.demand_history[:, -1] = demand
+
+        # ---- 4. Expire perishable goods ----
+        units_expired = self._expire_perishables()
+        self.total_units_expired += units_expired
+
+        # ---- 5. Compute reward ----
+        holding_cost = self._compute_holding_cost()
+        self.total_holding_cost += holding_cost
+
+        reward, raw_reward = self._compute_reward(
+            revenue, holding_cost, order_costs,
+            units_expired, stockout_units, demand, units_sold,
+        )
+
+        # ---- 6. Advance day ----
+        self.step_count += 1
+        self.day_of_week = (self.day_of_week + 1) % 7
+        done = self.step_count >= self.max_steps
+
+        info = self._get_info()
+        info.update(
+            {
+                "step_revenue": revenue,
+                "step_holding_cost": holding_cost,
+                "step_order_cost": order_costs,
+                "step_expiry_penalty": float(sum(
+                    units_expired[i] * self.product_configs[i]["expiry_penalty"]
+                    for i in range(self.num_products)
+                )),
+                "step_stockout_penalty": float(sum(
+                    stockout_units[i] * self.product_configs[i]["stockout_penalty"] * 3.0
+                    for i in range(self.num_products)
+                )),
+                "step_fill_rate": float(
+                    units_sold.sum() / max(demand.sum(), 1.0)
+                ),
+                "step_units_sold": units_sold.tolist(),
+                "step_units_expired": units_expired.tolist(),
+                "step_stockout_units": stockout_units.tolist(),
+                "step_demand": demand.tolist(),
+                "raw_reward": raw_reward,
+            }
+        )
+
+        return self._get_obs(), float(reward), done, False, info
+
+    # ------------------------------------------------------------------
+    # Step sub-methods
+    # ------------------------------------------------------------------
+    def _receive_shipments(self):
+        """Receive in-transit shipments that arrive today (day index 0)."""
         for i in range(self.num_products):
             arriving = self.in_transit[i, 0]
             if arriving > 0:
                 self.inventory[i] += arriving
-                # Track batch expiry for perishables
                 if self.product_configs[i]["perishable"]:
                     sl = self.product_configs[i]["shelf_life"]
                     self.expiry_tracker[i].append((arriving, sl))
-            # Shift in-transit pipeline
+            # Shift the in-transit pipeline forward
             self.in_transit[i] = np.roll(self.in_transit[i], -1)
             self.in_transit[i, -1] = 0.0
 
-        # ---- 2. Decode and place orders ----
+    def _place_orders(self, action: np.ndarray) -> Tuple[float, int]:
+        """Decode action indices and place orders. Returns (total_cost, emergency_count)."""
         order_costs = 0.0
         emergency_count = 0
+
         for i in range(self.num_products):
-            a = int(action[i])
-            is_emergency = False
-            if self.emergency_enabled and a >= len(ORDER_LEVELS):
-                # Emergency order
-                qty = EMERGENCY_ORDER_LEVELS[a - len(ORDER_LEVELS)]
-                is_emergency = True
-            else:
-                qty = ORDER_LEVELS[min(a, len(ORDER_LEVELS) - 1)]
+            qty, is_emergency = self.decode_action(int(action[i]), i)
 
             if qty <= 0:
                 continue
@@ -249,7 +408,7 @@ class WarehouseEnv(gym.Env):
                     continue
                 qty = min(qty, int(available))
 
-            # Supplier reliability (partial fulfillment for Task 3)
+            # Supplier reliability (partial fulfillment)
             if self.supplier_base_reliability < 1.0 and not is_emergency:
                 if self.rng.random() > self.supplier_base_reliability:
                     fill_frac = self.rng.uniform(self.partial_fill_min, 1.0)
@@ -264,7 +423,7 @@ class WarehouseEnv(gym.Env):
             if len(self.supplier_delivery_history[i]) > 10:
                 self.supplier_delivery_history[i].pop(0)
 
-            # Determine lead time
+            # Determine lead time and cost
             if is_emergency:
                 lt = self.emergency_lead_time
                 cost = self.product_configs[i]["ordering_cost"] * self.emergency_cost_mult
@@ -275,7 +434,7 @@ class WarehouseEnv(gym.Env):
 
             order_costs += cost
 
-            # Place in pipeline (or immediate for emergency)
+            # Place in pipeline (or immediate for emergency with lt=0)
             if lt == 0:
                 self.inventory[i] += qty
                 if self.product_configs[i]["perishable"]:
@@ -285,10 +444,10 @@ class WarehouseEnv(gym.Env):
                 lt_idx = min(lt - 1, self.max_lead_time - 1)
                 self.in_transit[i, lt_idx] += qty
 
-        self.total_ordering_cost += order_costs
-        self.total_emergency_orders += emergency_count
+        return order_costs, emergency_count
 
-        # ---- 3. Generate demand and fulfill ----
+    def _fulfill_demand(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+        """Generate demand and fulfill from inventory. Returns (demand, sold, stockout, revenue)."""
         demand = self.demand_sim.generate(
             self.day_of_week,
             self.step_count,
@@ -322,16 +481,10 @@ class WarehouseEnv(gym.Env):
                         remaining_to_deduct = 0
                 self.expiry_tracker[i] = new_batches
 
-        self.total_units_demanded += demand
-        self.total_units_sold += units_sold
-        self.total_stockout_units += stockout_units
-        self.total_revenue += revenue
+        return demand, units_sold, stockout_units, revenue
 
-        # Update demand history (rolling window of 7 days)
-        self.demand_history = np.roll(self.demand_history, -1, axis=1)
-        self.demand_history[:, -1] = demand
-
-        # ---- 4. Expire perishable goods ----
+    def _expire_perishables(self) -> np.ndarray:
+        """Age perishable batches and remove expired stock."""
         units_expired = np.zeros(self.num_products)
         for i in range(self.num_products):
             if not self.product_configs[i]["perishable"]:
@@ -350,41 +503,47 @@ class WarehouseEnv(gym.Env):
                 self.days_to_expiry[i] = min(exp for _, exp in new_batches)
             else:
                 self.days_to_expiry[i] = self.product_configs[i]["shelf_life"]
+        return units_expired
 
-        self.total_units_expired += units_expired
-
-        # ---- 5. Compute reward ----
-        holding_cost = sum(
+    def _compute_holding_cost(self) -> float:
+        """Sum per-product holding costs."""
+        return float(sum(
             self.inventory[i] * self.product_configs[i]["holding_cost"]
             for i in range(self.num_products)
-        )
+        ))
+
+    def _compute_reward(
+        self,
+        revenue: float,
+        holding_cost: float,
+        order_costs: float,
+        units_expired: np.ndarray,
+        stockout_units: np.ndarray,
+        demand: np.ndarray,
+        units_sold: np.ndarray,
+    ) -> Tuple[float, float]:
+        """Compute normalized reward. Returns (reward, raw_reward)."""
         expiry_penalty = sum(
             units_expired[i] * self.product_configs[i]["expiry_penalty"]
             for i in range(self.num_products)
         )
-        # Stockout penalty: weighted 3× to discourage under-ordering
         stockout_penalty = sum(
             stockout_units[i] * self.product_configs[i]["stockout_penalty"] * 3.0
             for i in range(self.num_products)
         )
-
-        self.total_holding_cost += holding_cost
 
         # Fill rate for this step
         total_demand_step = demand.sum()
         total_sold_step = units_sold.sum()
         fill_rate = total_sold_step / max(total_demand_step, 1.0)
 
-        # Expected revenue at full fill rate — used to scale bonuses/penalties
+        # Expected revenue at full fill rate
         expected_revenue = sum(
             self.demand_sim.means[i] * self.product_configs[i]["margin"]
             for i in range(self.num_products)
         )
 
         # Fill rate shaping: quadratic curve centered at 1.0
-        # fill_rate=1.0 → +50% of expected revenue as bonus
-        # fill_rate=0.5 → -37.5% of expected revenue as penalty
-        # Quadratic gives stronger gradient near high fill rates
         fill_rate_reward = expected_revenue * 0.5 * (2.0 * fill_rate - fill_rate * fill_rate - 0.5)
 
         # Holding cost scaled down so it doesn't dominate vs fill rate signal
@@ -407,31 +566,11 @@ class WarehouseEnv(gym.Env):
             + expected_revenue * 0.5
         )
         reward_range = max(max_possible - min_possible, 1.0)
-        reward = np.clip((raw_reward - min_possible) / reward_range, 0.0, 1.0)
-
-        # ---- 6. Advance day ----
-        self.step_count += 1
-        self.day_of_week = (self.day_of_week + 1) % 7
-        done = self.step_count >= self.max_steps
-
-        info = self._get_info()
-        info.update(
-            {
-                "step_revenue": revenue,
-                "step_holding_cost": holding_cost,
-                "step_order_cost": order_costs,
-                "step_expiry_penalty": expiry_penalty,
-                "step_stockout_penalty": stockout_penalty,
-                "step_fill_rate": fill_rate,
-                "step_units_sold": units_sold.tolist(),
-                "step_units_expired": units_expired.tolist(),
-                "step_stockout_units": stockout_units.tolist(),
-                "step_demand": demand.tolist(),
-                "raw_reward": raw_reward,
-            }
+        reward = np.clip(
+            (raw_reward - min_possible) / reward_range, SCORE_MIN, SCORE_MAX
         )
 
-        return self._get_obs(), float(reward), done, False, info
+        return float(reward), float(raw_reward)
 
     # ------------------------------------------------------------------
     # Observations & Info
@@ -477,6 +616,7 @@ class WarehouseEnv(gym.Env):
                 / max(np.mean(self.inventory) * self.step_count, 1.0)
             ),
             "step_count": self.step_count,
+            "product_names": self.get_product_names(),
         }
 
     def get_state(self) -> WarehouseState:

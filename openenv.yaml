@@ -2,23 +2,58 @@ name: warehouse-inventory-management
 version: "1.0.0"
 description: >
   Multi-product warehouse inventory control under stochastic demand,
-  variable lead times, and perishability constraints.
+  variable lead times, perishability constraints, supplier unreliability,
+  and emergency procurement. A benchmark environment for evaluating
+  RL, heuristic, and LLM-based inventory management policies.
+
+observation_space:
+  type: dict
+  fields:
+    inventory: "float32[N] — current stock per product"
+    in_transit: "float32[N, max_lead_time] — units arriving in d days"
+    days_to_expiry: "int32[N] — shelf life remaining (-1 = non-perishable)"
+    demand_history: "float32[N, 7] — last 7 days of demand per product"
+    storage_used: "float32[1] — fraction of warehouse capacity in use"
+    day_of_week: "int — 0 (Mon) to 6 (Sun)"
+    supplier_reliability: "float32[N] — rolling on-time delivery rate"
+
+action_space:
+  type: multi_discrete
+  description: >
+    One discrete action index per product. Each index maps to a reorder
+    quantity via ORDER_LEVELS = [0, 5, 10, 20, 50, 100].
+    Task 3 extends to 12 actions per product (6 normal + 6 emergency).
+
+grading:
+  score_range: "(0, 1) — strictly excludes 0.0 and 1.0"
+  epsilon: 0.001
+  description: >
+    Task-specific graders blend fill rate, cost efficiency, waste rate,
+    and profitability. All scores are epsilon-clamped.
+
 tasks:
   - id: task1_single_product
     difficulty: easy
     max_steps: 30
-    reward_range: [0.0, 1.0]
+    num_products: 1
+    reward_range: [0.001, 0.999]
   - id: task2_multi_product
     difficulty: medium
     max_steps: 60
-    reward_range: [0.0, 1.0]
+    num_products: 3
+    reward_range: [0.001, 0.999]
   - id: task3_nonstationary
     difficulty: hard
     max_steps: 90
-    reward_range: [0.0, 1.0]
+    num_products: 5
+    reward_range: [0.001, 0.999]
+
 api:
+  port: 7860
   endpoints:
     reset: POST /reset
-    step:  POST /step
-    state: GET  /state
-    tasks: GET  /tasks
+    step: POST /step
+    state: GET /state
+    tasks: GET /tasks
+    actions: GET /actions
+    health: GET /health

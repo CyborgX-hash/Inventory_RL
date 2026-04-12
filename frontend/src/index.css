@@ -151,7 +151,7 @@ body {
 
 .products-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
   gap: 1.5rem;
 }
 
@@ -301,45 +301,57 @@ body {
   font-size: 0.85rem;
   color: var(--text-secondary);
   font-weight: 500;
-}
-
-.slider-container {
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 1rem;
 }
 
-.order-slider {
-  -webkit-appearance: none;
-  flex-grow: 1;
-  height: 6px;
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 3px;
-  outline: none;
+/* Discrete Action Selector — replaces the continuous slider */
+.action-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
 }
 
-.order-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--text-primary);
+.action-btn {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: 1px solid var(--border-glass);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-secondary);
   cursor: pointer;
-  box-shadow: 0 0 10px rgba(0,0,0,0.5);
-  transition: transform 0.1s;
+  transition: all 0.15s ease;
+  white-space: nowrap;
 }
 
-.order-slider::-webkit-slider-thumb:hover {
-  transform: scale(1.2);
+.action-btn:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.3);
+  color: var(--text-primary);
 }
 
-.order-value {
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-  color: var(--accent-blue);
-  min-width: 2rem;
-  text-align: right;
-  font-size: 1.1rem;
+.action-btn-active {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: var(--accent-blue);
+  color: var(--text-primary);
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.2);
+}
+
+.action-btn-emergency {
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.action-btn-emergency.action-btn-active {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: var(--accent-red);
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.2);
+}
+
+.action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* Action Area */
@@ -406,4 +418,14 @@ body {
 
 .status-item strong {
   color: var(--text-primary);
+}
+
+/* Spin animation */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
 }

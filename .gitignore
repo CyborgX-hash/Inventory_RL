@@ -1,6 +1,59 @@
-frontend/.vite/
-.venv
+# Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+__MACOSX/
+Thumbs.db
+Desktop.ini
+
+# Node / Frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Dependency locks (uv)
+uv.lock
+
+# Trained model artifacts (use Git LFS for large models)
+models/**/*.zip
+models/**/logs/
+models/**/*_final*
+
+# Duplicate macOS copy artifacts
+*__pycache__ 2/
+*task*_2/
+
+# Misc
+*.log
+.env
+.env.*
+*.bak
+*.tmp
+
+# Pytest cache
+.pytest_cache/
+htmlcov/
+.coverage

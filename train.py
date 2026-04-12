@@ -24,6 +24,7 @@ import torch
 import torch.nn as nn
 
 from environment.warehouse_env import WarehouseEnv
+from environment.graders import get_grader, SCORE_MIN, SCORE_MAX
 
 
 # ──────────────────────────────────────────────────────────────
@@ -241,7 +242,6 @@ def train_task(
 
 def evaluate_model(model, task_id: str, seed: int = 42, num_episodes: int = 50):
     """Evaluate a trained model and print metrics."""
-    from environment.graders import get_grader
     from environment.warehouse_env import load_task_config
 
     config = load_task_config(task_id)
@@ -263,17 +263,17 @@ def evaluate_model(model, task_id: str, seed: int = 42, num_episodes: int = 50):
             obs, reward, done, truncated, info = env.step(action)
             total_reward += reward
 
-        score = grader.grade(info)
+        score = float(np.clip(grader.grade(info), SCORE_MIN, SCORE_MAX))
         scores.append(score)
         rewards.append(total_reward)
         fill_rates.append(info.get('fill_rate', 0))
         waste_rates.append(info.get('waste_rate', 0))
 
     print(f"  Episodes:       {num_episodes}")
-    print(f"  Avg Score:      {np.mean(scores):.4f} ± {np.std(scores):.4f}")
-    print(f"  Avg Reward:     {np.mean(rewards):.4f} ± {np.std(rewards):.4f}")
-    print(f"  Avg Fill Rate:  {np.mean(fill_rates):.4f} ± {np.std(fill_rates):.4f}")
-    print(f"  Avg Waste Rate: {np.mean(waste_rates):.4f} ± {np.std(waste_rates):.4f}")
+    print(f"  Avg Score:      {np.mean(scores):.4f} +/- {np.std(scores):.4f}")
+    print(f"  Avg Reward:     {np.mean(rewards):.4f} +/- {np.std(rewards):.4f}")
+    print(f"  Avg Fill Rate:  {np.mean(fill_rates):.4f} +/- {np.std(fill_rates):.4f}")
+    print(f"  Avg Waste Rate: {np.mean(waste_rates):.4f} +/- {np.std(waste_rates):.4f}")
 
     return {
         "avg_score": float(np.mean(scores)),
@@ -313,6 +313,11 @@ def main():
         default="models",
         help="Directory to save models (default: models)",
     )
+    parser.add_argument(
+        "--eval-only",
+        action="store_true",
+        help="Only run evaluation on existing models, skip training",
+    )
     args = parser.parse_args()
 
     tasks = (
@@ -321,15 +326,31 @@ def main():
         else [args.task]
     )
 
-    for task_id in tasks:
-        train_task(
-            task_id=task_id,
-            total_timesteps=args.timesteps,
-            seed=args.seed,
-            save_dir=args.save_dir,
-        )
+    if args.eval_only:
+        from stable_baselines3 import PPO as PPOModel
+        for task_id in tasks:
+            best_path = os.path.join(args.save_dir, task_id, "best_model.zip")
+            final_path = os.path.join(args.save_dir, f"{task_id}_final.zip")
+            if os.path.exists(best_path):
+                model_path = best_path
+            elif os.path.exists(final_path):
+                model_path = final_path
+            else:
+                print(f"No model found for {task_id}, skipping.")
+                continue
+            print(f"\nEvaluating {task_id} from {model_path}")
+            model = PPOModel.load(model_path)
+            evaluate_model(model, task_id, seed=args.seed, num_episodes=50)
+    else:
+        for task_id in tasks:
+            train_task(
+                task_id=task_id,
+                total_timesteps=args.timesteps,
+                seed=args.seed,
+                save_dir=args.save_dir,
+            )
 
-    print("\n✅ Training complete!")
+    print("\nDone!")
 
 
 if __name__ == "__main__":
