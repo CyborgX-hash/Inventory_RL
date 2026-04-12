@@ -10,24 +10,22 @@ Usage:
     python inference.py --num-seeds 5        # Multi-seed evaluation
 """
 
+import argparse
+import json
 import os
 import sys
-import json
-import argparse
+from typing import List, Optional
+
 import numpy as np
-from typing import Optional, List
 
-# Hackathon Checklist Requirements
-from openai import OpenAI
-
-API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
-MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4-turbo-preview")
-HF_TOKEN = os.getenv("HF_TOKEN")
-LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
-
-from environment.warehouse_env import WarehouseEnv, load_task_config, ORDER_LEVELS, EMERGENCY_ORDER_LEVELS
-from environment.graders import get_grader, SCORE_MIN, SCORE_MAX
 from baseline.heuristic_agent import HeuristicAgent
+from environment.graders import SCORE_MIN, SCORE_MAX, get_grader
+from environment.warehouse_env import (
+    EMERGENCY_ORDER_LEVELS,
+    ORDER_LEVELS,
+    WarehouseEnv,
+    load_task_config,
+)
 
 
 def _safe_score(score: float) -> float:
@@ -49,7 +47,10 @@ def run_heuristic(task_id: str, seed: int = 42, verbose: bool = True) -> dict:
 
     print(f"[START] task={task_id}", flush=True)
     if verbose:
-        print(json.dumps({"event": "START", "task_id": task_id, "agent": "heuristic", "episode": 1}), flush=True)
+        print(
+            json.dumps({"event": "START", "task_id": task_id, "agent": "heuristic", "episode": 1}),
+            flush=True,
+        )
 
     while not done:
         action = agent.act(obs)
@@ -95,6 +96,7 @@ def run_heuristic(task_id: str, seed: int = 42, verbose: bool = True) -> dict:
 def run_ppo(task_id: str, model_dir: str, seed: int = 42, verbose: bool = True) -> dict:
     """Run trained PPO model on a task."""
     from stable_baselines3 import PPO
+
     from train import FlattenedWarehouseEnv
 
     config = load_task_config(task_id)
@@ -123,7 +125,10 @@ def run_ppo(task_id: str, model_dir: str, seed: int = 42, verbose: bool = True) 
 
     print(f"[START] task={task_id}", flush=True)
     if verbose:
-        print(json.dumps({"event": "START", "task_id": task_id, "agent": "ppo", "episode": 1}), flush=True)
+        print(
+            json.dumps({"event": "START", "task_id": task_id, "agent": "ppo", "episode": 1}),
+            flush=True,
+        )
 
     while not done:
         action, _ = model.predict(obs, deterministic=True)
@@ -136,7 +141,7 @@ def run_ppo(task_id: str, model_dir: str, seed: int = 42, verbose: bool = True) 
             step_log = {
                 "event": "STEP",
                 "step": step,
-                "action_ids": action.tolist() if hasattr(action, 'tolist') else list(action),
+                "action_ids": action.tolist() if hasattr(action, "tolist") else list(action),
                 "reward": round(float(reward), 4),
                 "done": done,
                 "fill_rate": round(float(info.get("step_fill_rate", 0)), 4),
@@ -163,6 +168,11 @@ def run_ppo(task_id: str, model_dir: str, seed: int = 42, verbose: bool = True) 
         print(json.dumps(end_log), flush=True)
 
     return end_log
+
+
+# ────────────────────────────────────────────────────────────────
+# LLM Agent (optional — requires `pip install openai`)
+# ────────────────────────────────────────────────────────────────
 
 
 def _build_llm_system_prompt(env: WarehouseEnv) -> str:
@@ -197,12 +207,17 @@ def _build_llm_system_prompt(env: WarehouseEnv) -> str:
             f"holding=${pc['holding_cost']}/unit/day, "
             f"order_cost=${pc['ordering_cost']}/order"
         )
-        if pc['perishable']:
-            details += f", perishable (shelf_life={pc['shelf_life']}d, expiry_penalty=${pc['expiry_penalty']})"
+        if pc["perishable"]:
+            details += (
+                f", perishable (shelf_life={pc['shelf_life']}d, "
+                f"expiry_penalty=${pc['expiry_penalty']})"
+            )
         details += f", stockout_penalty=${pc['stockout_penalty']}"
         product_details.append(details)
 
-    capacity_info = f"Capacity: {env.capacity} units shared" if env.capacity else "Capacity: unlimited"
+    capacity_info = (
+        f"Capacity: {env.capacity} units shared" if env.capacity else "Capacity: unlimited"
+    )
     lt_info = f"Lead time: {env.lead_time_min}–{env.lead_time_max} days"
     reliability_info = f"Supplier reliability: {env.supplier_base_reliability * 100:.0f}%"
 
@@ -246,11 +261,7 @@ def _build_llm_user_prompt(
     last_action: Optional[List[int]] = None,
     last_reward: Optional[float] = None,
 ) -> str:
-    """Build a structured observation prompt for the LLM.
-
-    Includes current state, product-level analysis, and optional
-    context about the previous step's action and reward.
-    """
+    """Build a structured observation prompt for the LLM."""
     product_names = env.get_product_names()
     lines = ["Current warehouse state:"]
 
@@ -260,7 +271,11 @@ def _build_llm_user_prompt(
         total_transit = float(np.sum(transit))
         expiry = int(obs["days_to_expiry"][i])
         recent_demand = obs["demand_history"][i]
-        recent_nonzero = recent_demand[recent_demand > 0] if isinstance(recent_demand, np.ndarray) else [d for d in recent_demand if d > 0]
+        recent_nonzero = (
+            recent_demand[recent_demand > 0]
+            if isinstance(recent_demand, np.ndarray)
+            else [d for d in recent_demand if d > 0]
+        )
         avg_demand = float(np.mean(recent_nonzero)) if len(recent_nonzero) > 0 else 0.0
 
         lines.append(f"\n  Product {i} ({name}):")
@@ -278,11 +293,10 @@ def _build_llm_user_prompt(
     lines.append(f"\n  Day: {day_names[dow]} (index {dow})")
 
     storage = obs["storage_used"]
-    if hasattr(storage, '__len__'):
+    if hasattr(storage, "__len__"):
         storage = float(storage[0])
-    lines.append(f"  Storage used: {storage*100:.1f}%")
+    lines.append(f"  Storage used: {storage * 100:.1f}%")
 
-    # Add context from previous step
     if last_action is not None and last_reward is not None:
         lines.append(f"\n  Previous action: {last_action}")
         lines.append(f"  Previous reward: {last_reward:.4f}")
@@ -300,32 +314,32 @@ def _parse_llm_response(reply: str, num_products: int, max_action: int) -> Optio
     - Plain arrays without the action_ids key
     - Alternative key names (actions, action)
     """
+    import re
+
     reply = reply.strip()
 
     # Remove markdown code fences if present
     if reply.startswith("```"):
         lines = reply.split("\n")
-        reply = "\n".join(l for l in lines if not l.startswith("```"))
+        reply = "\n".join(line for line in lines if not line.startswith("```"))
         reply = reply.strip()
 
     try:
         parsed = json.loads(reply)
     except json.JSONDecodeError:
         # Try to find a JSON object in the text
-        import re
-        match = re.search(r'\{[^}]+\}', reply)
+        match = re.search(r"\{[^}]+\}", reply)
         if match:
             try:
                 parsed = json.loads(match.group())
             except json.JSONDecodeError:
-                # Try broader match for nested objects
-                pass
+                parsed = None
         else:
             parsed = None
 
         if parsed is None:
             # Try parsing as a plain array
-            match = re.search(r'\[[\d,\s]+\]', reply)
+            match = re.search(r"\[[\d,\s]+\]", reply)
             if match:
                 try:
                     arr = json.loads(match.group())
@@ -337,12 +351,7 @@ def _parse_llm_response(reply: str, num_products: int, max_action: int) -> Optio
 
     # Extract action_ids from various key names
     if isinstance(parsed, dict):
-        action_ids = (
-            parsed.get("action_ids")
-            or parsed.get("actions")
-            or parsed.get("action")
-            or None
-        )
+        action_ids = parsed.get("action_ids") or parsed.get("actions") or parsed.get("action")
     elif isinstance(parsed, list):
         action_ids = parsed
     else:
@@ -375,17 +384,32 @@ def run_llm(task_id: str, seed: int = 42, verbose: bool = True, max_retries: int
     - Robust parsing with up to max_retries on parse failure before heuristic fallback
     - Rolling context: previous action and reward passed to each step
     - Action index validation and clamping
+
+    Requires: pip install openai  (or: pip install -r requirements-llm.txt)
     """
+    # Lazy import — openai is optional
+    try:
+        from openai import OpenAI
+    except ImportError:
+        print(
+            "ERROR: openai package is not installed. "
+            "Install with: pip install -r requirements-llm.txt",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    api_base_url = os.environ.get("API_BASE_URL", "https://api.openai.com/v1")
+    model_name = os.environ.get("MODEL_NAME", "gpt-4-turbo-preview")
+
     config = load_task_config(task_id)
     grader = get_grader(config)
 
     client = OpenAI(
-        base_url=os.environ.get("API_BASE_URL", "https://api.openai.com/v1"),
-        api_key=os.environ.get("API_KEY", os.environ.get("OPENAI_API_KEY", "dummy-key"))
+        base_url=api_base_url,
+        api_key=os.environ.get("API_KEY", os.environ.get("OPENAI_API_KEY", "dummy-key")),
     )
 
     env = WarehouseEnv(task_id=task_id, seed=seed)
-    # Create a fallback heuristic agent for when LLM fails
     fallback_agent = HeuristicAgent(env)
 
     system_prompt = _build_llm_system_prompt(env)
@@ -400,33 +424,38 @@ def run_llm(task_id: str, seed: int = 42, verbose: bool = True, max_retries: int
 
     print(f"[START] task={task_id}", flush=True)
     if verbose:
-        print(json.dumps({"event": "START", "task_id": task_id, "agent": "llm", "episode": 1}), flush=True)
+        print(
+            json.dumps({"event": "START", "task_id": task_id, "agent": "llm", "episode": 1}),
+            flush=True,
+        )
 
     while not done:
         user_prompt = _build_llm_user_prompt(obs, env, last_action, last_reward)
         action_ids = None
 
-        # Try up to max_retries + 1 times
         for attempt in range(max_retries + 1):
             try:
                 response = client.chat.completions.create(
-                    model=MODEL_NAME,
+                    model=model_name,
                     messages=[
                         {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
+                        {"role": "user", "content": user_prompt},
                     ],
                     max_tokens=100,
-                    temperature=0.1,  # Low temperature for consistent structured output
+                    temperature=0.1,
                 )
                 reply = response.choices[0].message.content.strip()
-                action_ids = _parse_llm_response(reply, env.num_products, env.actions_per_product)
+                action_ids = _parse_llm_response(
+                    reply, env.num_products, env.actions_per_product
+                )
 
                 if action_ids is not None:
-                    break  # Success
+                    break
 
                 if verbose:
                     print(
-                        f"  [LLM] Parse failed (attempt {attempt + 1}/{max_retries + 1}): {reply[:80]}",
+                        f"  [LLM] Parse failed (attempt {attempt + 1}/{max_retries + 1}): "
+                        f"{reply[:80]}",
                         flush=True,
                     )
             except Exception as e:
@@ -436,9 +465,8 @@ def run_llm(task_id: str, seed: int = 42, verbose: bool = True, max_retries: int
         if action_ids is None:
             llm_failures += 1
             if verbose:
-                print(f"  [LLM] All attempts failed, using heuristic fallback", flush=True)
+                print("  [LLM] All attempts failed, using heuristic fallback", flush=True)
 
-        # Fallback to heuristic if LLM fails
         if action_ids is not None:
             action = np.array(action_ids, dtype=np.int64)
         else:
@@ -448,8 +476,7 @@ def run_llm(task_id: str, seed: int = 42, verbose: bool = True, max_retries: int
         total_reward += reward
         step += 1
 
-        # Track for rolling context
-        last_action = action.tolist() if hasattr(action, 'tolist') else list(action)
+        last_action = action.tolist() if hasattr(action, "tolist") else list(action)
         last_reward = float(reward)
 
         print(f"[STEP] step={step} reward={float(reward):.4f}", flush=True)
@@ -481,7 +508,11 @@ def run_llm(task_id: str, seed: int = 42, verbose: bool = True, max_retries: int
         "llm_failures": llm_failures,
     }
 
-    print(f"[END] task={task_id} score={float(score):.4f} steps={step} llm_failures={llm_failures}", flush=True)
+    print(
+        f"[END] task={task_id} score={float(score):.4f} steps={step} "
+        f"llm_failures={llm_failures}",
+        flush=True,
+    )
     if verbose:
         print(json.dumps(end_log), flush=True)
 
@@ -504,13 +535,15 @@ def main():
         help="Path to trained PPO model directory. If omitted, runs heuristic baseline.",
     )
     parser.add_argument(
-        "--use-llm", action="store_true", help="Run LLM agent using configured API endpoints."
+        "--use-llm",
+        action="store_true",
+        help="Run LLM agent using configured API endpoints.",
     )
+    parser.add_argument("--seed", type=int, default=42, help="Random seed (default: 42)")
     parser.add_argument(
-        "--seed", type=int, default=42, help="Random seed (default: 42)"
-    )
-    parser.add_argument(
-        "--num-seeds", type=int, default=1,
+        "--num-seeds",
+        type=int,
+        default=1,
         help="Number of seeds for multi-seed evaluation (default: 1)",
     )
     parser.add_argument(
@@ -528,13 +561,17 @@ def main():
         else [args.task]
     )
 
-    agent_name = "LLM (OpenAI API)" if args.use_llm else ("PPO" if args.model_dir else "Heuristic Baseline")
+    agent_name = (
+        "LLM (OpenAI API)"
+        if args.use_llm
+        else ("PPO" if args.model_dir else "Heuristic Baseline")
+    )
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("Warehouse Inventory Management — Inference")
     print(f"Agent: {agent_name}")
     print(f"Seeds: {args.num_seeds} (starting from {args.seed})")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     all_results = {}
     for task_id in tasks:
@@ -559,9 +596,9 @@ def main():
         }
 
     # Summary table
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print("RESULTS SUMMARY")
-    print(f"{'='*70}")
+    print(f"{'=' * 70}")
     print(f"{'Task':<25} {'Avg Score':>10} {'Std':>8} {'Fill Rate':>10} {'Reward':>10}")
     print("-" * 65)
     for tid, r in all_results.items():
@@ -570,7 +607,7 @@ def main():
             f"{tid:<25} {r['avg_score']:>10.4f} {r['std_score']:>8.4f} "
             f"{last['fill_rate']:>10.4f} {last['total_reward']:>10.4f}"
         )
-    print(f"{'='*70}\n")
+    print(f"{'=' * 70}\n")
 
 
 if __name__ == "__main__":

@@ -11,23 +11,23 @@ Endpoints (matching openenv.yaml):
 """
 
 import os
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from typing import Dict, List, Optional, Any
 
-from environment.warehouse_env import WarehouseEnv, load_task_config
+from environment.graders import SCORE_MIN, SCORE_MAX, get_grader
 from environment.models import (
-    OrderAction,
-    StepResult,
-    WarehouseState,
     ProductActionMetadata,
     TaskMetadata,
+    WarehouseState,
 )
-from environment.graders import get_grader, SCORE_MIN, SCORE_MAX
+from environment.warehouse_env import WarehouseEnv, load_task_config
 
 app = FastAPI(
     title="Warehouse Inventory Management API",
@@ -48,21 +48,58 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global environment instance
-env: Optional[WarehouseEnv] = None
-grader = None
+
+# ────────────────────────────────────────────────────────────────
+# Session Manager — replaces fragile global mutable state
+# ────────────────────────────────────────────────────────────────
 
 
-# ---------- Request/Response schemas ----------
+@dataclass
+class EnvironmentSession:
+    """Encapsulates a single environment episode.
+
+    Groups the environment instance, grader, and episode metadata
+    into one object so the server never has dangling global refs.
+    """
+
+    env: WarehouseEnv
+    grader: Any
+    task_id: str
+    episode_rewards: list = field(default_factory=list)
+
+    @classmethod
+    def create(cls, task_id: str, seed: int = 42) -> "EnvironmentSession":
+        """Factory: build a fresh session from a task_id."""
+        env = WarehouseEnv(task_id=task_id, seed=seed)
+        config = load_task_config(task_id)
+        grader = get_grader(config)
+        return cls(env=env, grader=grader, task_id=task_id)
+
+
+# Active session (one at a time — fine for single-user hackathon demo)
+_session: Optional[EnvironmentSession] = None
+
+
+def _get_session() -> EnvironmentSession:
+    """Return the active session or raise an HTTP 400 error."""
+    if _session is None:
+        raise HTTPException(
+            status_code=400, detail="Environment not initialized. Call /reset first."
+        )
+    return _session
+
+
+# ────────────────────────────────────────────────────────────────
+# Request / Response schemas
+# ────────────────────────────────────────────────────────────────
+
 
 class ResetRequest(BaseModel):
     task_id: str = Field(
         default="task1_single_product",
         description="Task to load: task1_single_product, task2_multi_product, or task3_nonstationary",
     )
-    seed: Optional[int] = Field(
-        default=None, description="Random seed for reproducibility"
-    )
+    seed: Optional[int] = Field(default=None, description="Random seed for reproducibility")
 
 
 class ResetResponse(BaseModel):
@@ -70,9 +107,7 @@ class ResetResponse(BaseModel):
     task_id: str
     max_steps: int
     num_products: int
-    product_names: List[str] = Field(
-        ..., description="Human-readable names for each product"
-    )
+    product_names: List[str] = Field(..., description="Human-readable names for each product")
     actions_per_product: int = Field(
         ..., description="Number of legal action indices per product"
     )
@@ -100,34 +135,39 @@ class StepResponse(BaseModel):
     score: Optional[float] = Field(
         None, description="Final graded score if episode is done (strictly in (0,1))"
     )
+    episode_rewards: List[float] = Field(
+        default_factory=list, description="Cumulative reward history for charting"
+    )
 
 
-# ---------- Endpoints ----------
+# ────────────────────────────────────────────────────────────────
+# Endpoints
+# ────────────────────────────────────────────────────────────────
+
 
 @app.post("/reset", response_model=ResetResponse)
 def reset_env(request: Optional[ResetRequest] = None):
     """Reset the environment for a new episode."""
-    global env, grader
+    global _session
 
     req = request or ResetRequest()
 
     try:
-        env = WarehouseEnv(task_id=req.task_id, seed=req.seed or 42)
-        grader = get_grader(env.config)
+        _session = EnvironmentSession.create(task_id=req.task_id, seed=req.seed or 42)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    obs, info = env.reset(seed=req.seed)
-    state = env.get_state()
+    _session.env.reset(seed=req.seed)
+    state = _session.env.get_state()
 
     return ResetResponse(
         state=state,
         task_id=req.task_id,
-        max_steps=env.max_steps,
-        num_products=env.num_products,
-        product_names=env.get_product_names(),
-        actions_per_product=env.actions_per_product,
-        legal_actions=env.get_legal_actions(),
+        max_steps=_session.env.max_steps,
+        num_products=_session.env.num_products,
+        product_names=_session.env.get_product_names(),
+        actions_per_product=_session.env.actions_per_product,
+        legal_actions=_session.env.get_legal_actions(),
     )
 
 
@@ -138,12 +178,8 @@ def step_env(request: Optional[StepRequest] = None):
     Send action_ids: an array of discrete action indices, one per product.
     Each index maps to a quantity via ORDER_LEVELS = [0, 5, 10, 20, 50, 100].
     """
-    global env, grader
-
-    if env is None:
-        raise HTTPException(
-            status_code=400, detail="Environment not initialized. Call /reset first."
-        )
+    session = _get_session()
+    env = session.env
 
     # Default to "no order" for all products if request is empty
     if request is None or request.action_ids is None:
@@ -172,20 +208,15 @@ def step_env(request: Optional[StepRequest] = None):
     obs, reward, done, truncated, info = env.step(action)
     state = env.get_state()
 
+    # Track episode reward history
+    session.episode_rewards.append(float(reward))
+
     # Convert numpy values in info to Python types
-    clean_info = {}
-    for k, v in info.items():
-        if isinstance(v, (np.floating, np.integer)):
-            clean_info[k] = float(v)
-        elif isinstance(v, np.ndarray):
-            clean_info[k] = v.tolist()
-        else:
-            clean_info[k] = v
+    clean_info = _serialize_info(info)
 
     score = None
-    if done and grader is not None:
-        raw_score = grader.grade(clean_info)
-        # Epsilon clamp is already applied inside grader, but double-check
+    if done and session.grader is not None:
+        raw_score = session.grader.grade(clean_info)
         score = float(np.clip(raw_score, SCORE_MIN, SCORE_MAX))
 
     return StepResponse(
@@ -194,29 +225,20 @@ def step_env(request: Optional[StepRequest] = None):
         done=done,
         info=clean_info,
         score=score,
+        episode_rewards=session.episode_rewards,
     )
 
 
 @app.get("/state", response_model=WarehouseState)
 def get_state():
     """Get the current warehouse state."""
-    global env
-    if env is None:
-        raise HTTPException(
-            status_code=400, detail="Environment not initialized. Call /reset first."
-        )
-    return env.get_state()
+    return _get_session().env.get_state()
 
 
 @app.get("/actions", response_model=List[ProductActionMetadata])
 def get_actions():
     """Get legal actions with quantity labels for each product."""
-    global env
-    if env is None:
-        raise HTTPException(
-            status_code=400, detail="Environment not initialized. Call /reset first."
-        )
-    return env.get_legal_actions()
+    return _get_session().env.get_legal_actions()
 
 
 @app.get("/tasks", response_model=List[TaskMetadata])
@@ -248,7 +270,27 @@ def health():
     return {"status": "ok"}
 
 
-# ---------- Static frontend serving ----------
+# ────────────────────────────────────────────────────────────────
+# Helpers
+# ────────────────────────────────────────────────────────────────
+
+
+def _serialize_info(info: dict) -> dict:
+    """Convert numpy types in info dict to JSON-safe Python types."""
+    clean = {}
+    for k, v in info.items():
+        if isinstance(v, (np.floating, np.integer)):
+            clean[k] = float(v)
+        elif isinstance(v, np.ndarray):
+            clean[k] = v.tolist()
+        else:
+            clean[k] = v
+    return clean
+
+
+# ────────────────────────────────────────────────────────────────
+# Static frontend serving
+# ────────────────────────────────────────────────────────────────
 
 static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")
 if os.path.exists(static_dir):
@@ -266,6 +308,7 @@ if os.path.exists(static_dir):
 
 def main():
     import uvicorn
+
     uvicorn.run("server.app:app", host="0.0.0.0", port=7860)
 
 

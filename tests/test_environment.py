@@ -8,6 +8,8 @@ Validates:
 - Reward range safety (epsilon-clamped, never exact 0.0 or 1.0)
 - Deterministic reproducibility with fixed seeds
 - Episode completion
+- Metric correctness
+- Service level tracking
 """
 
 import numpy as np
@@ -67,6 +69,19 @@ class TestReset:
         assert "fill_rate" in info
         assert "product_names" in info
         assert "step_count" in info
+        assert "service_level" in info
+
+    @pytest.mark.parametrize("task_id", TASK_IDS)
+    def test_reset_clears_accumulators(self, task_id):
+        """After reset, all episode accumulators should be zero."""
+        env = WarehouseEnv(task_id=task_id, seed=42)
+        # Step once first
+        env.reset(seed=42)
+        env.step(np.zeros(env.num_products, dtype=np.int64))
+        # Now reset
+        _, info = env.reset(seed=42)
+        assert info["total_revenue"] == 0.0
+        assert info["step_count"] == 0
 
 
 class TestStep:
@@ -130,6 +145,7 @@ class TestStep:
         assert "step_revenue" in info
         assert "step_fill_rate" in info
         assert "step_demand" in info
+        assert "raw_reward" in info
 
 
 class TestActionValidation:
@@ -158,6 +174,13 @@ class TestActionValidation:
         action = np.array([0], dtype=np.int64)  # 1 instead of 3
         with pytest.raises(ValueError, match="Expected 3"):
             env.validate_action(action)
+
+    def test_float_action_cast(self):
+        """Float actions should be cast to int without error."""
+        env = WarehouseEnv(task_id="task1_single_product", seed=42)
+        action = np.array([2.7])
+        result = env.validate_action(action)
+        assert result[0] == 2
 
 
 class TestDeterminism:
@@ -199,9 +222,7 @@ class TestLegalActions:
         assert env.emergency_enabled
         legal = env.get_legal_actions()
         for pm in legal:
-            # Should have 12 actions (6 normal + 6 emergency)
             assert len(pm.legal_actions) == 12
-            # Last 6 should be emergency
             for a in pm.legal_actions[6:]:
                 assert a.is_emergency
 
@@ -222,6 +243,82 @@ class TestDecodeAction:
             qty, is_emergency = env.decode_action(idx + len(ORDER_LEVELS), 0)
             assert qty == expected_qty
             assert is_emergency is True
+
+
+class TestMetrics:
+    """Verify episode metric calculations."""
+
+    def test_fill_rate_zero_when_no_inventory(self):
+        """With no ordering, fill rate should drop as inventory depletes."""
+        env = WarehouseEnv(task_id="task1_single_product", seed=42)
+        env.reset(seed=42)
+        done = False
+        while not done:
+            _, _, done, _, info = env.step(np.array([0], dtype=np.int64))
+        # No reordering → fill rate < 1.0 (initial inventory runs out)
+        assert info["fill_rate"] < 1.0
+
+    def test_waste_rate_zero_for_non_perishable(self):
+        """Task 1 has no perishables → waste_rate should be 0."""
+        env = WarehouseEnv(task_id="task1_single_product", seed=42)
+        env.reset(seed=42)
+        done = False
+        while not done:
+            _, _, done, _, info = env.step(np.array([3], dtype=np.int64))
+        assert info["waste_rate"] == 0.0
+
+    def test_service_level_range(self):
+        """Service level should be in [0, 1]."""
+        env = WarehouseEnv(task_id="task1_single_product", seed=42)
+        env.reset(seed=42)
+        done = False
+        while not done:
+            _, _, done, _, info = env.step(np.array([3], dtype=np.int64))
+        assert 0.0 <= info["service_level"] <= 1.0
+
+    def test_inventory_turnover_positive(self):
+        """With ordering and sales, turnover should be positive."""
+        env = WarehouseEnv(task_id="task1_single_product", seed=42)
+        env.reset(seed=42)
+        done = False
+        while not done:
+            _, _, done, _, info = env.step(np.array([3], dtype=np.int64))
+        assert info["inventory_turnover"] > 0
+
+    def test_emergency_orders_only_task3(self):
+        """Only task3 should have emergency orders tracked."""
+        env = WarehouseEnv(task_id="task1_single_product", seed=42)
+        env.reset(seed=42)
+        done = False
+        while not done:
+            _, _, done, _, info = env.step(np.array([0], dtype=np.int64))
+        assert info["total_emergency_orders"] == 0
+
+
+class TestWarehouseState:
+    """Verify Pydantic state serialization."""
+
+    @pytest.mark.parametrize("task_id", TASK_IDS)
+    def test_get_state_serializable(self, task_id):
+        """get_state() should return a JSON-serializable Pydantic model."""
+        env = WarehouseEnv(task_id=task_id, seed=42)
+        env.reset(seed=42)
+        state = env.get_state()
+        # Should be serializable to dict
+        state_dict = state.model_dump()
+        assert isinstance(state_dict, dict)
+        assert "inventory" in state_dict
+        assert "day_of_week" in state_dict
+
+    def test_state_after_step(self):
+        """State should reflect inventory changes after a step."""
+        env = WarehouseEnv(task_id="task1_single_product", seed=42)
+        env.reset(seed=42)
+        state_before = env.get_state()
+        env.step(np.array([5], dtype=np.int64))  # Order 100 units
+        state_after = env.get_state()
+        # Inventory should change due to demand consumption
+        assert state_before.inventory != state_after.inventory
 
 
 # --- Helpers ---

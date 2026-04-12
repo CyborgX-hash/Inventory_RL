@@ -1,14 +1,24 @@
 import { useState, useEffect } from 'react';
-import { RefreshCw, Play, Package, TrendingUp, AlertTriangle, AlertCircle, Calendar, Truck, Database, ChevronDown } from 'lucide-react';
+import { RefreshCw, Play, Package, TrendingUp, AlertTriangle, AlertCircle, Calendar, Truck, Database, BarChart3 } from 'lucide-react';
 import './index.css';
 
 const API_BASE = '';
 
-/**
- * ORDER_LEVELS maps action indices to order quantities.
- * This must stay in sync with environment/warehouse_env.py ORDER_LEVELS.
- */
-const ORDER_LEVELS = [0, 5, 10, 20, 50, 100];
+// Task descriptions for scenario presets
+const TASK_PRESETS = {
+  task1_single_product: {
+    label: 'Easy — Single Product',
+    desc: '1 non-perishable product, stable demand, fixed lead time. Learn basic reorder policy.',
+  },
+  task2_multi_product: {
+    label: 'Medium — Multi-Product',
+    desc: '3 products (1 perishable), seasonal demand, shared storage. Balance waste vs stockouts.',
+  },
+  task3_nonstationary: {
+    label: 'Hard — Non-Stationary',
+    desc: '5 products, demand shocks, unreliable suppliers, emergency orders. Full complexity.',
+  },
+};
 
 function App() {
   const [tasks, setTasks] = useState([]);
@@ -16,7 +26,6 @@ function App() {
   const [stateData, setStateData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  // Stores discrete action INDEX per product (0–5 for normal, 6–11 for emergency)
   const [actionIds, setActionIds] = useState([]);
   const [lastInfo, setLastInfo] = useState(null);
   const [score, setScore] = useState(null);
@@ -24,8 +33,8 @@ function App() {
   const [productNames, setProductNames] = useState([]);
   const [stepCount, setStepCount] = useState(0);
   const [maxSteps, setMaxSteps] = useState(0);
+  const [episodeRewards, setEpisodeRewards] = useState([]);
 
-  // Fetch available tasks on mount
   useEffect(() => {
     fetch(`${API_BASE}/tasks`)
       .then(res => res.json())
@@ -36,14 +45,13 @@ function App() {
       });
   }, []);
 
-  // Set environment state and sync inputs from reset response
   const applyResetData = (data) => {
     setStateData(data.state);
     setProductNames(data.product_names || []);
     setLegalActions(data.legal_actions || []);
     setMaxSteps(data.max_steps || 0);
     setStepCount(0);
-    // Initialize all action indices to 0 (no order)
+    setEpisodeRewards([]);
     setActionIds(new Array(data.num_products).fill(0));
   };
 
@@ -75,7 +83,6 @@ function App() {
       const res = await fetch(`${API_BASE}/step`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // Send discrete action indices — the canonical format
         body: JSON.stringify({ action_ids: actionIds })
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -83,10 +90,10 @@ function App() {
       setStateData(data.state);
       setLastInfo(data.info);
       setStepCount(prev => prev + 1);
+      setEpisodeRewards(data.episode_rewards || []);
       if (data.done) {
         setScore(data.score);
       }
-      // Reset all action indices to 0 (no order) after stepping
       setActionIds(new Array(data.state.inventory.length).fill(0));
     } catch (err) {
       setError(err.message);
@@ -95,7 +102,6 @@ function App() {
     }
   };
 
-  // Initial reset automatically
   useEffect(() => {
     if (tasks.length > 0 && !stateData && !loading) {
       handleReset();
@@ -106,20 +112,6 @@ function App() {
     const updated = [...actionIds];
     updated[productIdx] = parseInt(actionIndex, 10);
     setActionIds(updated);
-  };
-
-  // Get the label for a given action index
-  const getActionLabel = (productIdx, actionIndex) => {
-    if (legalActions.length > productIdx) {
-      const productActions = legalActions[productIdx];
-      const action = productActions.legal_actions.find(a => a.index === actionIndex);
-      if (action) return action.label;
-    }
-    // Fallback: use ORDER_LEVELS
-    if (actionIndex < ORDER_LEVELS.length) {
-      return actionIndex === 0 ? 'No order' : `${ORDER_LEVELS[actionIndex]} units`;
-    }
-    return `Action ${actionIndex}`;
   };
 
   // Error state
@@ -138,7 +130,6 @@ function App() {
     );
   }
 
-  // Loading state
   if (!stateData) {
     return (
       <div className="dashboard-container">
@@ -152,18 +143,18 @@ function App() {
 
   const { inventory, in_transit, days_to_expiry, demand_history, storage_used, day_of_week } = stateData;
   const numProducts = inventory.length;
-
-  // storage_used comes as a float from the API
   const storageUsedValue = typeof storage_used === 'number' ? storage_used : (Array.isArray(storage_used) ? storage_used[0] : 0);
-
   const getDayName = (dow) => ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][dow] || "Day";
+  const preset = TASK_PRESETS[selectedTask] || {};
 
   return (
     <div className="dashboard-container fade-enter">
       <header className="dashboard-header">
         <div>
           <h1 className="dashboard-title">Warehouse Control</h1>
-          <p style={{ color: 'var(--text-secondary)' }}>Advanced Agentic Inventory Management</p>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+            Adaptive Multi-Product Inventory Management Agent
+          </p>
         </div>
         
         <div className="controls-group">
@@ -171,18 +162,29 @@ function App() {
             className="task-select" 
             value={selectedTask}
             onChange={(e) => setSelectedTask(e.target.value)}
+            id="task-selector"
           >
             {tasks.map(t => (
-              <option key={t.id} value={t.id}>{t.difficulty.toUpperCase()}: {t.description || t.id}</option>
+              <option key={t.id} value={t.id}>
+                {TASK_PRESETS[t.id]?.label || t.id}
+              </option>
             ))}
           </select>
 
-          <button className="btn btn-danger" onClick={handleReset} disabled={loading}>
+          <button className="btn btn-danger" onClick={handleReset} disabled={loading} id="reset-btn">
             <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
             Reset
           </button>
         </div>
       </header>
+
+      {/* Scenario Description */}
+      {preset.desc && (
+        <div className="scenario-banner">
+          <AlertTriangle size={16} color="var(--accent-orange)" />
+          <span>{preset.desc}</span>
+        </div>
+      )}
 
       {/* Status Bar */}
       <div className="status-bar">
@@ -216,7 +218,7 @@ function App() {
         <div className="glass-panel metric-card">
           <div className="metric-header"><TrendingUp size={16} /> Total Revenue</div>
           <div className="metric-value positive">${lastInfo ? lastInfo?.total_revenue?.toFixed(0) : "0"}</div>
-          <span style={{fontSize: '0.8rem', color: 'var(--text-secondary)'}}>
+          <span className="metric-sub">
             Step: ${lastInfo?.step_revenue?.toFixed(0) || "0"}
           </span>
         </div>
@@ -226,7 +228,7 @@ function App() {
           <div className={`metric-value ${(lastInfo?.fill_rate || 0) > 0.9 ? 'positive' : (lastInfo?.fill_rate > 0.6 ? 'neutral' : 'negative')}`}>
             {lastInfo ? (lastInfo.fill_rate * 100).toFixed(1) : "0.0"}%
           </div>
-          <span style={{fontSize: '0.8rem', color: 'var(--text-secondary)'}}>
+          <span className="metric-sub">
             Step: {lastInfo ? ((lastInfo.step_fill_rate || 0) * 100).toFixed(1) : "0.0"}%
           </span>
         </div>
@@ -236,31 +238,45 @@ function App() {
           <div className="metric-value negative">
             ${lastInfo ? ((lastInfo.total_holding_cost || 0) + (lastInfo.total_ordering_cost || 0)).toFixed(0) : "0"}
           </div>
-          <span style={{fontSize: '0.8rem', color: 'var(--text-secondary)'}}>
-             Waste: {lastInfo ? ((lastInfo.waste_rate || 0) * 100).toFixed(1) : "0.0"}%
+          <span className="metric-sub">
+            Waste: {lastInfo ? ((lastInfo.waste_rate || 0) * 100).toFixed(1) : "0.0"}%
           </span>
         </div>
 
-        {lastInfo && lastInfo.raw_reward !== undefined && (
+        {lastInfo && lastInfo.service_level !== undefined && (
           <div className="glass-panel metric-card">
-            <div className="metric-header">Step Reward</div>
-            <div className="metric-value neutral">
-              {lastInfo.raw_reward.toFixed(1)}
+            <div className="metric-header"><BarChart3 size={16} /> Service Level</div>
+            <div className={`metric-value ${(lastInfo.service_level || 0) > 0.8 ? 'positive' : 'neutral'}`}>
+              {((lastInfo.service_level || 0) * 100).toFixed(1)}%
             </div>
-            <span style={{fontSize: '0.8rem', color: 'var(--text-secondary)'}}>
-              Normalized: {(lastInfo.step_fill_rate * 100).toFixed(1)}% fill
+            <span className="metric-sub">
+              Days with ≥95% fill rate
             </span>
           </div>
         )}
 
         {score !== null && (
-          <div className="glass-panel metric-card" style={{ boxShadow: '0 0 20px rgba(16, 185, 129, 0.2)', border: '1px solid rgba(16, 185, 129, 0.4)' }}>
+          <div className="glass-panel metric-card score-card">
             <div className="metric-header" style={{color: 'var(--accent-green)'}}>Final Score</div>
             <div className="metric-value positive">{(score * 100).toFixed(1)}</div>
-            <span style={{fontSize: '0.8rem', color: 'var(--text-secondary)'}}>Episode Complete!</span>
+            <span className="metric-sub">Episode Complete!</span>
           </div>
         )}
       </div>
+
+      {/* Reward History Sparkline */}
+      {episodeRewards.length > 1 && (
+        <div className="glass-panel chart-panel">
+          <div className="chart-header">
+            <BarChart3 size={16} />
+            <span>Episode Reward History</span>
+            <span className="chart-stat">
+              Avg: {(episodeRewards.reduce((a,b)=>a+b,0) / episodeRewards.length).toFixed(3)}
+            </span>
+          </div>
+          <RewardSparkline data={episodeRewards} />
+        </div>
+      )}
 
       {/* Products Grid */}
       <h2 className="section-title"><Package /> Product Status & Orders</h2>
@@ -271,13 +287,8 @@ function App() {
           const incoming = transitArray.reduce((a,b) => a+b, 0);
           const name = productNames[idx] || `Product ${idx + 1}`;
           
-          // Get legal actions for this product
-          const productLegalActions = legalActions[idx]?.legal_actions || ORDER_LEVELS.map((qty, i) => ({
-            index: i,
-            order_quantity: qty,
-            is_emergency: false,
-            label: qty === 0 ? 'No order' : `${qty} units`,
-          }));
+          // Legal actions come exclusively from API — single source of truth
+          const productLegalActions = legalActions[idx]?.legal_actions || [];
 
           return (
             <div key={idx} className="glass-panel product-card">
@@ -288,7 +299,6 @@ function App() {
                 </div>
               </div>
 
-              {/* Inventory Level */}
               <div className="progress-group">
                 <div className="progress-label">
                   <span>Inventory Level</span>
@@ -299,14 +309,12 @@ function App() {
                 </div>
               </div>
 
-              {/* Expiry Warning */}
               {isPerishable && (
                 <div style={{ fontSize: '0.85rem', color: days_to_expiry[idx] <= 2 ? 'var(--accent-red)' : 'var(--text-secondary)', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                   <AlertCircle size={14} /> Min days to expiry: <strong>{days_to_expiry[idx]}</strong>
                 </div>
               )}
 
-              {/* In Transit */}
               {incoming > 0 && (
                 <div className="in-transit-container">
                   <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', width: '100%' }}>In Transit:</div>
@@ -318,14 +326,12 @@ function App() {
                 </div>
               )}
 
-              {/* Demand History */}
               {demand_history && demand_history[idx] && (
                 <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
                   Avg demand (7d): <strong>{(demand_history[idx].reduce((a,b) => a+b, 0) / Math.max(demand_history[idx].filter(d => d > 0).length, 1)).toFixed(1)}</strong> units/day
                 </div>
               )}
 
-              {/* Order Control — Discrete Action Selector */}
               <div className="order-controls">
                 <div className="order-label">
                   Reorder Action <span style={{ color: 'var(--accent-blue)', fontSize: '0.75rem' }}>(index {actionIds[idx] || 0})</span>
@@ -338,6 +344,7 @@ function App() {
                       onClick={() => handleActionChange(idx, action.index)}
                       disabled={score !== null}
                       title={`Action index ${action.index}: ${action.label}`}
+                      id={`action-btn-${idx}-${action.index}`}
                     >
                       {action.is_emergency ? '🚨 ' : ''}{action.label}
                     </button>
@@ -355,12 +362,58 @@ function App() {
           className="btn btn-primary btn-large" 
           onClick={handleStep}
           disabled={loading || score !== null}
+          id="step-btn"
         >
           {score !== null ? "Episode Done — Reset to Continue" : "Execute Step & Advance Day"} <Play size={20} />
         </button>
       </div>
 
     </div>
+  );
+}
+
+/** SVG sparkline for episode reward history */
+function RewardSparkline({ data }) {
+  if (!data || data.length < 2) return null;
+
+  const width = 800;
+  const height = 80;
+  const padding = 4;
+
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  const range = max - min || 1;
+
+  const points = data.map((v, i) => {
+    const x = padding + (i / (data.length - 1)) * (width - 2 * padding);
+    const y = height - padding - ((v - min) / range) * (height - 2 * padding);
+    return `${x},${y}`;
+  });
+
+  const areaPoints = [
+    `${padding},${height - padding}`,
+    ...points,
+    `${width - padding},${height - padding}`,
+  ];
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} className="sparkline-svg" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="sparkGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="var(--accent-blue)" stopOpacity="0.3" />
+          <stop offset="100%" stopColor="var(--accent-blue)" stopOpacity="0.02" />
+        </linearGradient>
+      </defs>
+      <polygon points={areaPoints.join(' ')} fill="url(#sparkGrad)" />
+      <polyline
+        points={points.join(' ')}
+        fill="none"
+        stroke="var(--accent-blue)"
+        strokeWidth="2"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+    </svg>
   );
 }
 

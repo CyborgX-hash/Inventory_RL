@@ -9,9 +9,9 @@ Validates:
 - /state returns current state
 - /actions returns legal action metadata
 - Error handling for invalid inputs
+- Response schema completeness
 """
 
-import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
@@ -91,11 +91,19 @@ class TestResetEndpoint:
         response = client.post("/reset", json={"task_id": "task1_single_product", "seed": 123})
         assert response.status_code == 200
 
+    def test_reset_response_schema(self, client):
+        """Verify all expected fields are in reset response."""
+        response = client.post("/reset", json={"task_id": "task2_multi_product"})
+        data = response.json()
+        assert data["num_products"] == 3
+        assert data["actions_per_product"] == 6
+        assert len(data["product_names"]) == 3
+        assert len(data["legal_actions"]) == 3
+
 
 class TestStepEndpoint:
     def test_step_no_init(self, client):
         """Step without reset should work if we reset first."""
-        # Reset first
         client.post("/reset", json={"task_id": "task1_single_product"})
         response = client.post("/step", json={"action_ids": [0]})
         assert response.status_code == 200
@@ -108,6 +116,7 @@ class TestStepEndpoint:
         assert "reward" in data
         assert "done" in data
         assert "info" in data
+        assert "episode_rewards" in data
 
     def test_step_wrong_length(self, client, reset_env):
         response = client.post("/step", json={"action_ids": [0, 0, 0]})
@@ -120,6 +129,15 @@ class TestStepEndpoint:
     def test_step_negative_action(self, client, reset_env):
         response = client.post("/step", json={"action_ids": [-1]})
         assert response.status_code == 400
+
+    def test_episode_rewards_accumulate(self, client):
+        """Episode rewards list should grow with each step."""
+        client.post("/reset", json={"task_id": "task1_single_product", "seed": 42})
+
+        for step in range(3):
+            response = client.post("/step", json={"action_ids": [0]})
+            data = response.json()
+            assert len(data["episode_rewards"]) == step + 1
 
     def test_full_episode(self, client):
         """Run a full episode and verify final score."""
@@ -139,6 +157,8 @@ class TestStepEndpoint:
                 # Score must be in safe range
                 assert data["score"] > 0.0
                 assert data["score"] < 1.0
+                # Episode rewards should have all steps
+                assert len(data["episode_rewards"]) == max_steps
 
 
 class TestStateEndpoint:
@@ -169,3 +189,14 @@ class TestActionsEndpoint:
         assert len(actions) == 5  # 5 products
         for product in actions:
             assert len(product["legal_actions"]) == 12
+
+    def test_actions_schema_completeness(self, client, reset_env):
+        """Each action should have all metadata fields."""
+        response = client.get("/actions")
+        actions = response.json()
+        for product in actions:
+            for action in product["legal_actions"]:
+                assert "index" in action
+                assert "order_quantity" in action
+                assert "is_emergency" in action
+                assert "label" in action

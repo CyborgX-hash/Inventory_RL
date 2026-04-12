@@ -1,0 +1,3 @@
+# Optional LLM inference dependencies
+# Install with: pip install -r requirements-llm.txt
+openai>=1.0.0

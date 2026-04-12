@@ -1,0 +1,46 @@
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__
+*.py[cod]
+.venv
+venv
+.eggs
+*.egg-info
+.pytest_cache
+.coverage
+htmlcov
+.ruff_cache
+
+# Node (frontend node_modules rebuilt in Docker)
+frontend/node_modules
+
+# IDE
+.idea
+.vscode
+*.swp
+
+# OS
+.DS_Store
+__MACOSX
+Thumbs.db
+
+# Training artifacts (not needed at runtime)
+models/*/logs/
+results/
+
+# Docs
+*.md
+!README.md
+
+# CI
+.github
+
+# Misc
+*.log
+.env
+.env.*
+uv.lock

@@ -34,16 +34,16 @@ node_modules/
 frontend/dist/
 frontend/.vite/
 
-# Dependency locks (uv)
+# Dependency locks (generated — not needed for reproducibility)
+uv.lock
 
 # Trained model artifacts (use Git LFS for large models)
 models/**/*.zip
 models/**/logs/
 models/**/*_final*
 
-# Duplicate macOS copy artifacts
-*__pycache__ 2/
-*task*_2/
+# Benchmark results (generated)
+results/
 
 # Misc
 *.log
@@ -56,3 +56,6 @@ models/**/*_final*
 .pytest_cache/
 htmlcov/
 .coverage
+
+# Ruff cache
+.ruff_cache/

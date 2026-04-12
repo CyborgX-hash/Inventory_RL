@@ -6,21 +6,22 @@ and emergency reorder logic across all three task difficulty levels.
 """
 
 import os
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
+
 import gymnasium as gym
 import numpy as np
 import yaml
 from gymnasium import spaces
-from typing import Any, Dict, List, Optional, Tuple
 
 from environment.demand_simulator import DemandSimulator
 from environment.graders import SCORE_MIN, SCORE_MAX
 from environment.models import (
-    WarehouseState,
-    StepResult,
     ActionChoice,
     ProductActionMetadata,
+    StepResult,
+    WarehouseState,
 )
-
 
 # Valid per-product order quantities
 ORDER_LEVELS = [0, 5, 10, 20, 50, 100]
@@ -29,6 +30,34 @@ ORDER_LEVELS = [0, 5, 10, 20, 50, 100]
 EMERGENCY_ORDER_LEVELS = [0, 5, 10, 20, 50, 100]
 
 TASKS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "tasks")
+
+
+@dataclass(frozen=True)
+class RewardConfig:
+    """Configurable coefficients for the reward function.
+
+    Extracted from magic numbers so reward shaping can be tuned
+    and documented in one place.
+
+    Reward = revenue
+             − holding_cost × holding_weight
+             − order_cost × ordering_weight
+             − expiry_penalty
+             − stockout_penalty × stockout_multiplier
+             + fill_rate_shaping_reward
+    """
+
+    holding_weight: float = 0.3
+    """Downscale holding cost vs revenue so it doesn't dominate."""
+
+    ordering_weight: float = 0.5
+    """Frequency-of-ordering penalty: encourages batching."""
+
+    stockout_multiplier: float = 3.0
+    """Extra multiplier on per-unit stockout penalty from config (strong signal)."""
+
+    fill_rate_shape_weight: float = 0.5
+    """Weight of quadratic fill-rate shaping term relative to expected revenue."""
 
 
 def load_task_config(task_id: str) -> dict:
@@ -100,8 +129,9 @@ class WarehouseEnv(gym.Env):
         # --- Warehouse ---
         wh = self.config["warehouse"]
         self.capacity = wh.get("capacity")  # None = unlimited
-        self.fill_rate_bonus_threshold = wh.get("fill_rate_bonus_threshold", 0.95)
-        self.fill_rate_bonus_value = wh.get("fill_rate_bonus", 5.0)
+
+        # --- Reward ---
+        self.reward_config = RewardConfig()
 
         # --- Task params ---
         self.max_steps = self.config["max_steps"]
@@ -113,7 +143,6 @@ class WarehouseEnv(gym.Env):
 
         # --- Action space ---
         if self.emergency_enabled:
-            # 12 actions per product: 6 normal + 6 emergency
             self.actions_per_product = len(ORDER_LEVELS) + len(EMERGENCY_ORDER_LEVELS)
         else:
             self.actions_per_product = len(ORDER_LEVELS)
@@ -166,8 +195,6 @@ class WarehouseEnv(gym.Env):
         self.days_to_expiry = np.array(
             [p.get("shelf_life") or -1 for p in self.product_configs], dtype=np.int32
         )
-        # Track the actual expiry of each batch (simplified: track overall shelf life countdown)
-        # For perishables, we reset expiry when new stock arrives
         self.expiry_tracker: List[List[Tuple[float, int]]] = [
             [] for _ in range(self.num_products)
         ]
@@ -199,6 +226,11 @@ class WarehouseEnv(gym.Env):
         self.total_stockout_units = np.zeros(self.num_products)
         self.total_emergency_orders = 0
         self.total_cost_of_goods = 0.0
+
+        # Rolling inventory sum for accurate turnover calculation
+        self._inventory_sum_over_steps = 0.0
+        # Service level tracking: number of days with fill_rate >= 0.95
+        self._high_service_days = 0
 
     def reset(
         self, *, seed: Optional[int] = None, options: Optional[dict] = None
@@ -252,37 +284,42 @@ class WarehouseEnv(gym.Env):
     def get_legal_actions(self) -> List[ProductActionMetadata]:
         """Return structured metadata about legal actions for each product.
 
-        This is useful for LLM agents and frontend UIs to understand
-        what each action index means.
+        This is the single source of truth for the frontend and LLM agents.
         """
         result = []
         for i, pc in enumerate(self.product_configs):
             choices = []
-            # Normal orders
             for idx, qty in enumerate(ORDER_LEVELS):
                 label = f"{qty} units" if qty > 0 else "No order"
-                choices.append(ActionChoice(
-                    index=idx,
-                    order_quantity=qty,
-                    is_emergency=False,
-                    label=label,
-                ))
-            # Emergency orders (Task 3 only)
+                choices.append(
+                    ActionChoice(
+                        index=idx,
+                        order_quantity=qty,
+                        is_emergency=False,
+                        label=label,
+                    )
+                )
             if self.emergency_enabled:
                 for idx, qty in enumerate(EMERGENCY_ORDER_LEVELS):
                     action_idx = idx + len(ORDER_LEVELS)
-                    label = f"{qty} units (emergency)" if qty > 0 else "No emergency order"
-                    choices.append(ActionChoice(
-                        index=action_idx,
-                        order_quantity=qty,
-                        is_emergency=True,
-                        label=label,
-                    ))
-            result.append(ProductActionMetadata(
-                product_index=i,
-                product_name=pc["name"],
-                legal_actions=choices,
-            ))
+                    label = (
+                        f"{qty} units (emergency)" if qty > 0 else "No emergency order"
+                    )
+                    choices.append(
+                        ActionChoice(
+                            index=action_idx,
+                            order_quantity=qty,
+                            is_emergency=True,
+                            label=label,
+                        )
+                    )
+            result.append(
+                ProductActionMetadata(
+                    product_index=i,
+                    product_name=pc["name"],
+                    legal_actions=choices,
+                )
+            )
         return result
 
     # ------------------------------------------------------------------
@@ -337,32 +374,49 @@ class WarehouseEnv(gym.Env):
         self.total_holding_cost += holding_cost
 
         reward, raw_reward = self._compute_reward(
-            revenue, holding_cost, order_costs,
-            units_expired, stockout_units, demand, units_sold,
+            revenue,
+            holding_cost,
+            order_costs,
+            units_expired,
+            stockout_units,
+            demand,
+            units_sold,
         )
 
         # ---- 6. Advance day ----
         self.step_count += 1
         self.day_of_week = (self.day_of_week + 1) % 7
+
+        # Track rolling inventory for turnover & service level
+        self._inventory_sum_over_steps += float(np.sum(self.inventory))
+        step_fill_rate = float(units_sold.sum() / max(demand.sum(), 1.0))
+        if step_fill_rate >= 0.95:
+            self._high_service_days += 1
+
         done = self.step_count >= self.max_steps
 
+        rc = self.reward_config
         info = self._get_info()
         info.update(
             {
                 "step_revenue": revenue,
                 "step_holding_cost": holding_cost,
                 "step_order_cost": order_costs,
-                "step_expiry_penalty": float(sum(
-                    units_expired[i] * self.product_configs[i]["expiry_penalty"]
-                    for i in range(self.num_products)
-                )),
-                "step_stockout_penalty": float(sum(
-                    stockout_units[i] * self.product_configs[i]["stockout_penalty"] * 3.0
-                    for i in range(self.num_products)
-                )),
-                "step_fill_rate": float(
-                    units_sold.sum() / max(demand.sum(), 1.0)
+                "step_expiry_penalty": float(
+                    sum(
+                        units_expired[i] * self.product_configs[i]["expiry_penalty"]
+                        for i in range(self.num_products)
+                    )
                 ),
+                "step_stockout_penalty": float(
+                    sum(
+                        stockout_units[i]
+                        * self.product_configs[i]["stockout_penalty"]
+                        * rc.stockout_multiplier
+                        for i in range(self.num_products)
+                    )
+                ),
+                "step_fill_rate": step_fill_rate,
                 "step_units_sold": units_sold.tolist(),
                 "step_units_expired": units_expired.tolist(),
                 "step_stockout_units": stockout_units.tolist(),
@@ -426,7 +480,9 @@ class WarehouseEnv(gym.Env):
             # Determine lead time and cost
             if is_emergency:
                 lt = self.emergency_lead_time
-                cost = self.product_configs[i]["ordering_cost"] * self.emergency_cost_mult
+                cost = (
+                    self.product_configs[i]["ordering_cost"] * self.emergency_cost_mult
+                )
                 emergency_count += 1
             else:
                 lt = self.rng.integers(self.lead_time_min, self.lead_time_max + 1)
@@ -446,7 +502,9 @@ class WarehouseEnv(gym.Env):
 
         return order_costs, emergency_count
 
-    def _fulfill_demand(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+    def _fulfill_demand(
+        self,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
         """Generate demand and fulfill from inventory. Returns (demand, sold, stockout, revenue)."""
         demand = self.demand_sim.generate(
             self.day_of_week,
@@ -477,7 +535,9 @@ class WarehouseEnv(gym.Env):
                     elif qty_batch <= remaining_to_deduct:
                         remaining_to_deduct -= qty_batch
                     else:
-                        new_batches.append((qty_batch - remaining_to_deduct, exp))
+                        new_batches.append(
+                            (qty_batch - remaining_to_deduct, exp)
+                        )
                         remaining_to_deduct = 0
                 self.expiry_tracker[i] = new_batches
 
@@ -507,10 +567,12 @@ class WarehouseEnv(gym.Env):
 
     def _compute_holding_cost(self) -> float:
         """Sum per-product holding costs."""
-        return float(sum(
-            self.inventory[i] * self.product_configs[i]["holding_cost"]
-            for i in range(self.num_products)
-        ))
+        return float(
+            sum(
+                self.inventory[i] * self.product_configs[i]["holding_cost"]
+                for i in range(self.num_products)
+            )
+        )
 
     def _compute_reward(
         self,
@@ -522,13 +584,26 @@ class WarehouseEnv(gym.Env):
         demand: np.ndarray,
         units_sold: np.ndarray,
     ) -> Tuple[float, float]:
-        """Compute normalized reward. Returns (reward, raw_reward)."""
+        """Compute normalized reward. Returns (reward, raw_reward).
+
+        Components (see RewardConfig for coefficient documentation):
+          + revenue               — direct sales income
+          − holding_cost × w_h    — penalize excess inventory
+          − order_costs × w_o     — penalize over-ordering frequency
+          − expiry_penalty        — waste from expired perishables
+          − stockout_penalty × w_s — unmet demand signal
+          + fill_rate_shaping     — quadratic curve rewarding high fill rate
+        """
+        rc = self.reward_config
+
         expiry_penalty = sum(
             units_expired[i] * self.product_configs[i]["expiry_penalty"]
             for i in range(self.num_products)
         )
         stockout_penalty = sum(
-            stockout_units[i] * self.product_configs[i]["stockout_penalty"] * 3.0
+            stockout_units[i]
+            * self.product_configs[i]["stockout_penalty"]
+            * rc.stockout_multiplier
             for i in range(self.num_products)
         )
 
@@ -544,26 +619,32 @@ class WarehouseEnv(gym.Env):
         )
 
         # Fill rate shaping: quadratic curve centered at 1.0
-        fill_rate_reward = expected_revenue * 0.5 * (2.0 * fill_rate - fill_rate * fill_rate - 0.5)
+        fill_rate_reward = expected_revenue * rc.fill_rate_shape_weight * (
+            2.0 * fill_rate - fill_rate * fill_rate - 0.5
+        )
 
-        # Holding cost scaled down so it doesn't dominate vs fill rate signal
         raw_reward = (
             revenue
-            - holding_cost * 0.3
-            - order_costs * 0.5
+            - holding_cost * rc.holding_weight
+            - order_costs * rc.ordering_weight
             - expiry_penalty
             - stockout_penalty
             + fill_rate_reward
         )
 
         # Normalize reward to [0, 1] using per-step practical bounds
-        max_possible = expected_revenue * 2.0 + expected_revenue * 0.5
+        max_possible = (
+            expected_revenue * 2.0
+            + expected_revenue * rc.fill_rate_shape_weight
+        )
         min_possible = -(
             sum(
-                self.demand_sim.means[i] * self.product_configs[i]["stockout_penalty"] * 3.0
+                self.demand_sim.means[i]
+                * self.product_configs[i]["stockout_penalty"]
+                * rc.stockout_multiplier
                 for i in range(self.num_products)
             )
-            + expected_revenue * 0.5
+            + expected_revenue * rc.fill_rate_shape_weight
         )
         reward_range = max(max_possible - min_possible, 1.0)
         reward = np.clip(
@@ -601,9 +682,21 @@ class WarehouseEnv(gym.Env):
         total_expired = self.total_units_expired.sum()
         waste_rate = total_expired / max(total_sold + total_expired, 1.0)
 
+        # Inventory turnover: uses episode-average inventory (not instantaneous)
+        avg_inventory = (
+            self._inventory_sum_over_steps / max(self.step_count, 1)
+        )
+        inventory_turnover = total_sold / max(avg_inventory, 1.0)
+
+        # Service level: fraction of days with fill_rate >= 95%
+        service_level = (
+            self._high_service_days / max(self.step_count, 1)
+        )
+
         return {
             "fill_rate": fill_rate,
             "waste_rate": waste_rate,
+            "service_level": service_level,
             "total_revenue": self.total_revenue,
             "total_holding_cost": self.total_holding_cost,
             "total_ordering_cost": self.total_ordering_cost,
@@ -611,10 +704,7 @@ class WarehouseEnv(gym.Env):
             "total_units_expired": total_expired,
             "total_stockout_units": self.total_stockout_units.sum(),
             "total_emergency_orders": self.total_emergency_orders,
-            "inventory_turnover": (
-                total_sold
-                / max(np.mean(self.inventory) * self.step_count, 1.0)
-            ),
+            "inventory_turnover": inventory_turnover,
             "step_count": self.step_count,
             "product_names": self.get_product_names(),
         }
@@ -627,9 +717,7 @@ class WarehouseEnv(gym.Env):
             days_to_expiry=self.days_to_expiry.tolist(),
             demand_history=self.demand_history.tolist(),
             storage_used=float(
-                np.sum(self.inventory) / self.capacity
-                if self.capacity
-                else 0.0
+                np.sum(self.inventory) / self.capacity if self.capacity else 0.0
             ),
             day_of_week=int(self.day_of_week),
             supplier_reliability=[

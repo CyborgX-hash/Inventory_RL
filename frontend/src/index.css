@@ -38,7 +38,7 @@ body {
   padding: 2rem;
   display: flex;
   flex-direction: column;
-  gap: 2rem;
+  gap: 1.5rem;
 }
 
 /* Glass UI Elements */
@@ -63,7 +63,6 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1rem;
 }
 
 .dashboard-title {
@@ -79,6 +78,19 @@ body {
   display: flex;
   gap: 1rem;
   align-items: center;
+}
+
+/* Scenario Banner */
+.scenario-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1.25rem;
+  background: rgba(245, 158, 11, 0.06);
+  border: 1px solid rgba(245, 158, 11, 0.15);
+  border-radius: 10px;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
 }
 
 /* Select Dropdown */
@@ -145,8 +157,8 @@ body {
 /* Grid Layouts */
 .metrics-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.25rem;
 }
 
 .products-grid {
@@ -167,12 +179,12 @@ body {
   align-items: center;
   gap: 0.5rem;
   color: var(--text-secondary);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 500;
 }
 
 .metric-value {
-  font-size: 2.25rem;
+  font-size: 2rem;
   font-weight: 700;
   letter-spacing: -0.02em;
 }
@@ -180,6 +192,16 @@ body {
 .metric-value.positive { color: var(--accent-green); }
 .metric-value.negative { color: var(--accent-red); }
 .metric-value.neutral { color: var(--text-primary); }
+
+.metric-sub {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.score-card {
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.2);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
 
 /* Product Card */
 .product-card {
@@ -306,7 +328,7 @@ body {
   align-items: center;
 }
 
-/* Discrete Action Selector — replaces the continuous slider */
+/* Discrete Action Selector */
 .action-selector {
   display: flex;
   flex-wrap: wrap;
@@ -383,7 +405,6 @@ body {
 .section-title {
   font-size: 1.25rem;
   font-weight: 600;
-  margin-bottom: 1rem;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -420,6 +441,34 @@ body {
   color: var(--text-primary);
 }
 
+/* Chart Panel */
+.chart-panel {
+  padding: 1rem 1.5rem;
+}
+
+.chart-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 0.75rem;
+}
+
+.chart-stat {
+  margin-left: auto;
+  color: var(--accent-blue);
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.sparkline-svg {
+  width: 100%;
+  height: 64px;
+  display: block;
+}
+
 /* Spin animation */
 @keyframes spin {
   from { transform: rotate(0deg); }
@@ -428,4 +477,14 @@ body {
 
 .animate-spin {
   animation: spin 1s linear infinite;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .dashboard-container { padding: 1rem; }
+  .dashboard-header { flex-direction: column; gap: 1rem; align-items: flex-start; }
+  .status-bar { flex-direction: column; gap: 1rem; }
+  .metrics-grid { grid-template-columns: 1fr 1fr; }
+  .products-grid { grid-template-columns: 1fr; }
+  .btn-large { padding: 0.75rem 1.5rem; font-size: 1rem; }
 }

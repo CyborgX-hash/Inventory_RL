@@ -2,46 +2,54 @@
 PPO Training Script for the Warehouse Inventory Management Agent.
 
 Uses Stable-Baselines3 with:
-  - Normalized observations (VecNormalize) for stable learning
+  - Normalized observations (manual scaling) for stable learning
   - Tuned hyperparameters for the multi-product action space
   - Proper episode-length-aligned rollouts
 """
 
-import os
-import sys
 import argparse
-import numpy as np
+import os
+
 import gymnasium as gym
-from gymnasium import spaces
-
-from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import EvalCallback, BaseCallback
-from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
-from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
-from stable_baselines3.common.monitor import Monitor
-
+import numpy as np
 import torch
 import torch.nn as nn
+from gymnasium import spaces
+from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
+from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.vec_env import DummyVecEnv
 
+from environment.graders import SCORE_MIN, SCORE_MAX, get_grader
 from environment.warehouse_env import WarehouseEnv
-from environment.graders import get_grader, SCORE_MIN, SCORE_MAX
 
 
 # ──────────────────────────────────────────────────────────────
 # Gymnasium wrapper: flatten Dict obs + normalize
 # ──────────────────────────────────────────────────────────────
 
+# Named normalization constants — derived from typical value ranges:
+#   inventory: 0–200 units typical, /200 → [0, 1]
+#   in_transit: 0–100 units per slot, /100 → [0, 1]
+#   days_to_expiry: 0–10 for perishables (max shelf_life=7), /10 → [0, 1]
+#   demand_history: 0–100 units/day typical, /100 → [0, 1]
+NORM_INVENTORY = 200.0
+NORM_IN_TRANSIT = 100.0
+NORM_EXPIRY = 10.0
+NORM_DEMAND = 100.0
+
+
 class FlattenedWarehouseEnv(gym.Env):
     """Wraps WarehouseEnv to flatten Dict observation into a normalized 1-D Box.
 
-    Normalization scales:
-      - inventory / 200   (typical range 0-200)
-      - in_transit / 100
-      - days_to_expiry / 10  (max shelf life ~5-7 days)
-      - demand_history / 100
-      - storage_used already in [0,1]
+    Normalization scales each observation component into roughly [0, 1]:
+      - inventory / NORM_INVENTORY
+      - in_transit / NORM_IN_TRANSIT
+      - days_to_expiry / NORM_EXPIRY  (-1 → -0.1 for non-perishable)
+      - demand_history / NORM_DEMAND
+      - storage_used: already in [0,1]
       - day_of_week → one-hot [0,1]
-      - supplier_reliability already in [0,1]
+      - supplier_reliability: already in [0,1]
     """
 
     metadata = {"render_modes": []}
@@ -62,22 +70,22 @@ class FlattenedWarehouseEnv(gym.Env):
     def _flatten_obs(self, obs: dict) -> np.ndarray:
         """Flatten and normalize dict observation into a 1-D array."""
         parts = []
-        # inventory (N,) — normalize by 200
-        parts.append(np.asarray(obs["inventory"], dtype=np.float32).flatten() / 200.0)
-        # in_transit (N, max_lt) — normalize by 100
-        parts.append(np.asarray(obs["in_transit"], dtype=np.float32).flatten() / 100.0)
-        # days_to_expiry (N,) — normalize by 10, -1 → -0.1 for non-perishable
-        dte = np.asarray(obs["days_to_expiry"], dtype=np.float32).flatten() / 10.0
+        parts.append(
+            np.asarray(obs["inventory"], dtype=np.float32).flatten() / NORM_INVENTORY
+        )
+        parts.append(
+            np.asarray(obs["in_transit"], dtype=np.float32).flatten() / NORM_IN_TRANSIT
+        )
+        dte = np.asarray(obs["days_to_expiry"], dtype=np.float32).flatten() / NORM_EXPIRY
         parts.append(dte)
-        # demand_history (N, 7) — normalize by 100
-        parts.append(np.asarray(obs["demand_history"], dtype=np.float32).flatten() / 100.0)
-        # storage_used (1,) — already [0,1]
+        parts.append(
+            np.asarray(obs["demand_history"], dtype=np.float32).flatten() / NORM_DEMAND
+        )
         parts.append(np.asarray(obs["storage_used"], dtype=np.float32).flatten())
         # day_of_week → one-hot (7,)
         dow = np.zeros(7, dtype=np.float32)
         dow[int(obs["day_of_week"])] = 1.0
         parts.append(dow)
-        # supplier_reliability (N,) — already [0,1]
         parts.append(
             np.asarray(obs["supplier_reliability"], dtype=np.float32).flatten()
         )
@@ -96,12 +104,15 @@ class FlattenedWarehouseEnv(gym.Env):
 # Training
 # ──────────────────────────────────────────────────────────────
 
+
 def make_env(task_id: str, seed: int):
     """Factory for creating wrapped + monitored environments."""
+
     def _init():
         env = FlattenedWarehouseEnv(task_id=task_id, seed=seed)
         env = Monitor(env)
         return env
+
     return _init
 
 
@@ -131,7 +142,7 @@ class RewardLoggerCallback(BaseCallback):
 # Task-specific hyperparameters
 TASK_CONFIG = {
     "task1_single_product": {
-        "n_steps": 512,     # ~17 episodes per rollout (30-step episodes)
+        "n_steps": 512,  # ~17 episodes per rollout (30-step episodes)
         "batch_size": 64,
         "n_epochs": 10,
         "learning_rate": 3e-4,
@@ -140,20 +151,20 @@ TASK_CONFIG = {
         "default_timesteps": 100_000,
     },
     "task2_multi_product": {
-        "n_steps": 1024,    # ~17 episodes per rollout (60-step episodes)
+        "n_steps": 1024,  # ~17 episodes per rollout (60-step episodes)
         "batch_size": 128,
         "n_epochs": 10,
         "learning_rate": 2.5e-4,
-        "ent_coef": 0.02,   # More exploration for 3 products
+        "ent_coef": 0.02,  # More exploration for 3 products
         "net_arch": dict(pi=[128, 128], vf=[128, 128]),
         "default_timesteps": 200_000,
     },
     "task3_nonstationary": {
-        "n_steps": 2048,    # ~22 episodes per rollout (90-step episodes)
+        "n_steps": 2048,  # ~22 episodes per rollout (90-step episodes)
         "batch_size": 256,
         "n_epochs": 15,
         "learning_rate": 2e-4,
-        "ent_coef": 0.03,   # High exploration for 5 products × emergency orders
+        "ent_coef": 0.03,  # High exploration for 5 products × emergency orders
         "net_arch": dict(pi=[256, 256, 128], vf=[256, 256, 128]),
         "default_timesteps": 500_000,
     },
@@ -172,12 +183,12 @@ def train_task(
     if total_timesteps is None:
         total_timesteps = cfg["default_timesteps"]
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Training PPO on: {task_id}")
     print(f"Total timesteps: {total_timesteps}")
     print(f"n_steps: {cfg['n_steps']}, batch_size: {cfg['batch_size']}")
     print(f"Network: {cfg['net_arch']}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     os.makedirs(save_dir, exist_ok=True)
 
@@ -193,7 +204,7 @@ def train_task(
         n_steps=cfg["n_steps"],
         batch_size=cfg["batch_size"],
         n_epochs=cfg["n_epochs"],
-        gamma=0.995,           # High discount — inventory consequences are long-term
+        gamma=0.995,  # High discount — inventory consequences are long-term
         gae_lambda=0.95,
         clip_range=0.2,
         ent_coef=cfg["ent_coef"],
@@ -266,8 +277,8 @@ def evaluate_model(model, task_id: str, seed: int = 42, num_episodes: int = 50):
         score = float(np.clip(grader.grade(info), SCORE_MIN, SCORE_MAX))
         scores.append(score)
         rewards.append(total_reward)
-        fill_rates.append(info.get('fill_rate', 0))
-        waste_rates.append(info.get('waste_rate', 0))
+        fill_rates.append(info.get("fill_rate", 0))
+        waste_rates.append(info.get("waste_rate", 0))
 
     print(f"  Episodes:       {num_episodes}")
     print(f"  Avg Score:      {np.mean(scores):.4f} +/- {np.std(scores):.4f}")
@@ -287,6 +298,7 @@ def evaluate_model(model, task_id: str, seed: int = 42, num_episodes: int = 50):
 # Main
 # ──────────────────────────────────────────────────────────────
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Train PPO agent for Warehouse Inventory Management"
@@ -295,7 +307,12 @@ def main():
         "--task",
         type=str,
         default="all",
-        choices=["task1_single_product", "task2_multi_product", "task3_nonstationary", "all"],
+        choices=[
+            "task1_single_product",
+            "task2_multi_product",
+            "task3_nonstationary",
+            "all",
+        ],
         help="Which task to train on (default: all)",
     )
     parser.add_argument(
@@ -328,6 +345,7 @@ def main():
 
     if args.eval_only:
         from stable_baselines3 import PPO as PPOModel
+
         for task_id in tasks:
             best_path = os.path.join(args.save_dir, task_id, "best_model.zip")
             final_path = os.path.join(args.save_dir, f"{task_id}_final.zip")
