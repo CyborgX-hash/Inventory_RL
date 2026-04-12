@@ -2,6 +2,10 @@
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+include = ["environment*", "server*", "baseline*"]
+exclude = ["tests*", "frontend*", "models*"]
+
 [project]
 name = "inventory_rl"
 version = "1.0.0"
