@@ -1,4 +1,5 @@
 # Core dependencies — sufficient for environment, training, API, and benchmarking
+openenv-core>=0.2.0
 gymnasium>=0.29.0
 numpy>=1.24.0
 pydantic>=2.0.0
